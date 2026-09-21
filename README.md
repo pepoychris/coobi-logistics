@@ -16,7 +16,8 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-5 - Logistics REST API, and MVP-6 - real-time browser streaming.**
+**MVP-5 - Logistics REST API, MVP-6 - real-time browser streaming, and MVP-7 - Vue
+real-time dashboard.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -52,8 +53,14 @@ instead of forwarded from Kafka, and a stream nobody watches costs nothing: its 
 only while a browser is connected.
 See [docs/logistics-api.md](docs/logistics-api.md).
 
-The frontend arrives in the following milestone, which is tracked in the implementation
-roadmap as milestones and issues.
+The dashboard is implemented (MVP-7): `frontend/` is a Vue 3 application with TypeScript, built
+by Vite, that reads that API and its two streams. It draws the five live KPIs of the pipeline,
+the fleet on a Leaflet map over OpenStreetMap tiles - one marker per vehicle, updated in place -
+and the events the processor stores as they arrive, in a feed bounded to a fixed number of rows.
+Every value it shows comes from the backend, a statistic the API reports as absent is drawn as a
+gap, and a stream that is not live says so instead of showing stale numbers as if they were
+current.
+See [docs/frontend.md](docs/frontend.md).
 
 ## Configuration
 
@@ -114,6 +121,11 @@ variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED
 `STOPPED_WINDOW_SECONDS` and `MOVEMENT_THRESHOLD_METERS` by the stream processor
 (MVP-2 and MVP-3), and `STREAM_PROCESSOR_METRICS_URL` and the `COOBI_STREAM_*` variables by
 the logistics-api (MVP-5 and MVP-6).
+
+The dashboard of MVP-7 is not a service with an environment of its own: Vite reads
+`VITE_API_BASE_URL` and `VITE_API_PROXY_TARGET` from `frontend/.env` at build time, and both
+are documented in [frontend/.env.example](frontend/.env.example). Root `.env.example` names
+them and points there, so one place remains the reference for the names of the contract.
 
 `.env` is listed in `.gitignore` and must never be committed. No credential is
 versioned in this repository: `POSTGRES_PASSWORD` is documented with an empty value, and
@@ -348,6 +360,42 @@ migrations drift apart.
 Read [docs/logistics-api.md](docs/logistics-api.md) for the complete configuration contract,
 the response of every endpoint, the source of every statistic and the troubleshooting table.
 
+## Vue Dashboard
+
+`frontend/` is the public-facing half of the project: the screen a reader opens to see the
+pipeline working. It needs Node.js 20.19 or newer and the API of the local stack:
+
+```powershell
+cd frontend
+npm install
+npm run dev
+```
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dev server listens on <http://localhost:5173> and proxies `/api` to `http://localhost:8082`,
+so the page reaches the API of its own origin - which is what makes the streams work in a
+browser without enabling CORS on a service that deliberately does not answer other origins.
+
+| Item | Value |
+| --- | --- |
+| Stack | Vue 3 with TypeScript, Vite, Leaflet over OpenStreetMap tiles; no UI framework |
+| Reads | `GET /api/v1/statistics`, `GET /api/v1/vehicles`, `GET /api/v1/stream/events` and `GET /api/v1/stream/statistics`; it writes nothing |
+| Configuration | `VITE_API_BASE_URL` (empty means the origin that served the dashboard) and `VITE_API_PROXY_TARGET` (`http://localhost:8082`), both documented in [frontend/.env.example](frontend/.env.example) |
+| KPIs | `Events processed`, `Events per second`, `Active vehicles`, `Alerts generated` and `System status`, every one of them read from the API; a value reported as `null` is drawn as a gap and never as a zero |
+| Map | One marker per `vehicleId`, created for a vehicle that is new and moved afterwards, so the map is laid out once; a click shows `vehicleId`, `speed`, `status` and `lastUpdate` |
+| Feed | The `alert` and `vehicle` events of the stream, oldest first, alerts set apart from telemetry, at most 100 rows in the browser with the oldest evicted first |
+| States | Connecting, live, reconnecting and disconnected, each of them visible in the header and in the KPI cards |
+| Build | `npm run build` type-checks with `vue-tsc` and writes `dist/` |
+| Tests | `npm test` - deterministic, offline, with `fetch` and `EventSource` replaced by stand-ins |
+
+Read [docs/frontend.md](docs/frontend.md) for the environment contract, the states of a stream,
+the bounds the browser keeps and the troubleshooting table.
+
 ## Repository Layout
 
 ```text
@@ -368,12 +416,13 @@ coobi-logistics/
 ```
 
 `services/event-generator` holds the MVP-1 implementation, `services/stream-processor` the
-MVP-2 to MVP-4 implementation and `services/logistics-api` the MVP-5 implementation, each with
-its own Maven wrapper and its service documentation
+MVP-2 to MVP-4 implementation and `services/logistics-api` the MVP-5 and MVP-6 implementation,
+each with its own Maven wrapper and its service documentation
 ([docs/event-generator.md](docs/event-generator.md),
 [docs/stream-processor.md](docs/stream-processor.md),
-[docs/logistics-api.md](docs/logistics-api.md)). The `frontend` and `infrastructure`
-directories are intentionally empty placeholders at this stage.
+[docs/logistics-api.md](docs/logistics-api.md)). `frontend` holds the MVP-7 dashboard, built by
+npm rather than Maven and documented in [docs/frontend.md](docs/frontend.md).
+`infrastructure` is still an empty placeholder.
 
 ## Technology Stack
 

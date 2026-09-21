@@ -1,0 +1,17 @@
+# Installed dependencies and build output.
+node_modules/
+dist/
+coverage/
+
+# Local environment overrides. `.env.example` documents the contract and is
+# tracked; `.env` and `.env.*.local` hold machine-local values and are not.
+.env
+.env.*.local
+
+# Vite caches.
+.vite/
+*.tsbuildinfo
+
+# Editor and OS files.
+.DS_Store
+Thumbs.db
