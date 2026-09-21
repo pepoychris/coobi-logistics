@@ -17,7 +17,8 @@ stream processing and sustained high-throughput ingestion.
 ## Current Status
 
 **MVP-5 - Logistics REST API, MVP-6 - real-time browser streaming, MVP-7 - Vue real-time
-dashboard, and MVP-8 - observability.**
+dashboard, MVP-8 - observability, MVP-9 - testing and reliability, and MVP-10 - single-command
+local deployment.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -81,6 +82,16 @@ The container tests are skipped with the reason Testcontainers reports on a mach
 Docker, and a default `mvn test` neither compiles nor needs them.
 See [docs/testing-reliability.md](docs/testing-reliability.md).
 
+The local deployment is complete (MVP-10): `docker compose up --build` starts the whole stack -
+Kafka, PostgreSQL, the three services, the dashboard and Prometheus - from images this
+repository builds, so a machine with nothing installed but Docker can evaluate the project
+without installing Java, Maven, Node, Kafka or PostgreSQL. Each application image is a
+multi-stage build that runs as an unprivileged user and answers a health check on its own
+Actuator endpoint or on the page it serves, every dependency between the services is a
+condition on one of those health checks rather than on a startup order, and Prometheus scrapes
+the two services under their names on the Compose network.
+See [docs/deployment.md](docs/deployment.md).
+
 ## Configuration
 
 Configuration is environment-variable based. `.env.example` is the source of truth for
@@ -128,7 +139,7 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` | Most vehicle states one tick of the event stream may carry | `30` | vehicle states (count) |
 | `COOBI_STREAM_STATISTICS_INTERVAL` | How often the statistics stream reads and sends the live statistics | `1s` | duration (`250ms`, `2s`) |
 | `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS` | Browsers one stream serves at a time; the next connection is answered `503` | `32` | connections (count) |
-| `PROMETHEUS_HOST` | Host the Prometheus container scrapes the two stream services on | `host.docker.internal` | host name or IP address |
+| `API_PROXY_TARGET` | Origin the dashboard container proxies `/api` to | `http://logistics-api:8082` | URL |
 
 Each service reads these variables from its own environment, and a value already
 present in that environment wins over any fallback baked into the service. `compose.yml`
@@ -142,9 +153,13 @@ variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED
 (MVP-2 and MVP-3), and `STREAM_PROCESSOR_METRICS_URL` and the `COOBI_STREAM_*` variables by
 the logistics-api (MVP-5 and MVP-6).
 
-`PROMETHEUS_HOST` is read by the Prometheus container of the stack (MVP-8), which uses it to
-reach the two services that publish metrics. [docs/observability.md](docs/observability.md)
-documents the metrics themselves.
+`API_PROXY_TARGET` is read by the dashboard container (MVP-10), which proxies `/api` to that
+origin so the browser keeps talking to the origin that served the page. The scrape targets of
+the Prometheus container are not variables: they are the service names of the stack, written out
+in `infrastructure/prometheus/prometheus.yml`, because Prometheus expands `${VAR}` references of
+its configuration file in `external_labels` and nowhere else.
+[docs/observability.md](docs/observability.md) documents the metrics themselves and
+[docs/deployment.md](docs/deployment.md) the stack that produces them.
 
 The dashboard of MVP-7 is not a service with an environment of its own: Vite reads
 `VITE_API_BASE_URL` and `VITE_API_PROXY_TARGET` from `frontend/.env` at build time, and both
@@ -162,13 +177,27 @@ command instead of starting the stack with no password.
 `compose.yml` at the repository root defines the local development stack:
 
 ```text
-kafka       apache/kafka:4.3.1                single-node KRaft broker, no ZooKeeper
-postgres    postgres:18.6                     PostgreSQL
-prometheus  prom/prometheus:v3.14.0-busybox   scrapes the two stream services (MVP-8)
+kafka             apache/kafka:4.3.1                 single-node KRaft broker, no ZooKeeper
+postgres          postgres:18.6                      PostgreSQL
+event-generator   built from services/event-generator telemetry simulator (MVP-1)
+stream-processor  built from services/stream-processor processing and persistence (MVP-2..4)
+logistics-api     built from services/logistics-api   REST API and streams (MVP-5 and MVP-6)
+frontend          built from frontend                 Vue dashboard (MVP-7)
+prometheus        prom/prometheus:v3.14.0-busybox    scrapes the two services (MVP-8)
 ```
 
-All three services publish their ports on the loopback interface only (`127.0.0.1:9092`,
-`127.0.0.1:5432` and `127.0.0.1:9090`), so the stack is never reachable from another machine.
+All seven services publish their ports on the loopback interface only, so the stack is never
+reachable from another machine (Global Rule 8):
+
+| Service | URL |
+| --- | --- |
+| Dashboard | <http://localhost:5173> |
+| Logistics API | <http://localhost:8082/api/v1/vehicles> |
+| Event generator | <http://localhost:8080/actuator/health> |
+| Stream processor | <http://localhost:8081/actuator/health> |
+| Prometheus | <http://localhost:9090> |
+| Kafka | `localhost:9092` |
+| PostgreSQL | `localhost:5432` |
 
 Start the stack:
 
@@ -186,13 +215,17 @@ docker compose up --build -d
 docker compose ps
 ```
 
-`docker compose up --build -d` is the canonical local startup command (Global Rule 18).
-The `--build` flag is currently a no-op, because no service in this stack ships a
-Dockerfile yet, and it stays part of the command so that it keeps working once the
-application services arrive. `docker compose up -d`, the MVP-0.2 acceptance criterion, is
-the equivalent command today.
+`docker compose up --build -d` is the canonical local startup command (Global Rule 18). The
+`--build` flag builds the four application images from their Dockerfiles, so the command is the
+whole setup: Docker is the only thing that has to be installed, and nothing has to be run from
+the host. Docker with the Compose plugin `v2.24` or newer is the documented requirement.
 
-`docker compose ps` reports both services as `running` and then `healthy`. Compose reads
+`docker compose ps` reports the seven services as `running` and then `healthy`. A service does
+not start before the health checks of what it needs have passed - the generator waits for the
+broker, the processor for the broker and the database, the API for the database and the
+processor, and the dashboard for the API - and a container that is restarted is restarted by
+its own policy, so a restart of Kafka or PostgreSQL does not require rebuilding anything.
+Compose reads
 the `POSTGRES_*` values from `.env` or from the shell environment, and an exported shell
 variable wins over `.env`. Compose resolves them before it creates any container, so a
 missing or empty `POSTGRES_PASSWORD` aborts the command instead of starting the stack with
@@ -235,8 +268,12 @@ reaches it at `postgres:5432`.
 Prometheus is reachable from the host at `http://localhost:9090` (MVP-8). It scrapes the
 Actuator endpoints of the event generator and the stream processor every 15 seconds, using
 the configuration in `infrastructure/prometheus/prometheus.yml`, and stores what it reads in
-its own volume for 15 days. The two services run from the host in this stack, so the scrape
-targets are reached through `host.docker.internal`; `PROMETHEUS_HOST` overrides the address.
+its own volume for 15 days. The two services run in this stack, so the targets are their
+service names on the Compose network, `event-generator:8080` and `stream-processor:8081`,
+written out in that file: Prometheus expands `${VAR}` references of its configuration in
+`external_labels` and nowhere else, so a target holding one would be scraped as its own name.
+To scrape a service started from the host instead, change the one target to
+`host.docker.internal:8080` or `:8081`.
 
 A target is `down` until the service it describes is running, which is why the Prometheus of
 a stack that has only started its infrastructure reports both of them as down. The metric
@@ -255,7 +292,9 @@ and they are the only tests that need Docker.
 | Unit tests, one service | `mvn test -f services/<service>/pom.xml` |
 | Unit tests, every service | `mvn test` |
 | Integration tests | `mvn -Dintegration-tests test` |
+| Deployment contract | `pwsh -File infrastructure/scripts/verify-deployment.ps1` - add `-Stack` to build the images, start the whole stack and probe it over HTTP |
 | Contract, layers and commands | [docs/testing-reliability.md](docs/testing-reliability.md) |
+| Stack, images and health dependencies | [docs/deployment.md](docs/deployment.md) |
 
 The integration tests start `apache/kafka:4.3.1` and `postgres:18.6`, the two images
 `compose.yml` runs, and the smoke test starts the stream processor next to the API so that a
@@ -270,7 +309,9 @@ reports, and the default `mvn test` neither compiles them nor resolves their dep
 
 `services/event-generator` simulates the fleet and produces the telemetry that the rest of
 the pipeline consumes. It ships a Maven wrapper, so a local Maven installation is not
-required, and it needs only a running Kafka broker:
+required, and it needs only a running Kafka broker. It also runs as a container of the stack
+(MVP-10), which needs neither a JDK nor Maven: `docker compose up --build`. What follows is the
+way to run it from the host, which is what a contributor working on the service does.
 
 ```powershell
 docker compose up -d
@@ -335,7 +376,8 @@ contract, the simulator model, the observability signals and the troubleshooting
 
 `services/stream-processor` consumes the telemetry, validates it and produces alerts. It
 ships a Maven wrapper and it provisions its topics on startup, so it needs only a running
-Kafka broker:
+Kafka broker. It also runs as a container of the stack (MVP-10), which is the way to start it
+without a JDK:
 
 ```powershell
 docker compose up -d
@@ -382,7 +424,8 @@ contract, the validation rules, the alert contract and the troubleshooting table
 the state the processor has already persisted, and it writes nothing: it maps the tables of
 MVP-4, it owns no migration and its connection pool is read-only. It also serves the two
 browser streams of MVP-6, which are views of that same state rather than a second copy of it.
-It ships a Maven wrapper and needs only the PostgreSQL of the local stack:
+It ships a Maven wrapper and needs only the PostgreSQL of the local stack, or nothing at all
+when it runs as a container of the stack (MVP-10):
 
 ```powershell
 docker compose up -d
@@ -428,7 +471,10 @@ the response of every endpoint, the source of every statistic and the troublesho
 ## Vue Dashboard
 
 `frontend/` is the public-facing half of the project: the screen a reader opens to see the
-pipeline working. It needs Node.js 20.19 or newer and the API of the local stack:
+pipeline working. In the stack it is a container (MVP-10) that serves the built bundle on
+<http://localhost:5173> and proxies `/api` to the API itself, which is the way to open it
+without installing Node. Working on it needs Node.js 20.19 or newer and the API of the local
+stack:
 
 ```powershell
 cd frontend
@@ -466,11 +512,11 @@ the bounds the browser keeps and the troubleshooting table.
 ```text
 coobi-logistics/
 ├── services/
-│   ├── event-generator/    # Vehicle telemetry simulator
-│   ├── stream-processor/   # Kafka Streams processing service
-│   └── logistics-api/      # REST API and real-time event streaming
-├── frontend/               # Vue 3 + TypeScript dashboard
-├── infrastructure/         # Local infrastructure and observability assets
+│   ├── event-generator/    # Vehicle telemetry simulator + Dockerfile
+│   ├── stream-processor/   # Kafka Streams processing service + Dockerfile
+│   └── logistics-api/      # REST API and real-time event streaming + Dockerfile
+├── frontend/               # Vue 3 + TypeScript dashboard, its Dockerfile and nginx template
+├── infrastructure/         # Prometheus scrape configuration and the deployment check
 ├── docs/                   # Architecture, event contracts and benchmarks
 ├── .editorconfig
 ├── .env.example

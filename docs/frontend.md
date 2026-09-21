@@ -10,7 +10,13 @@ No UI framework and no paid map provider are involved.
 
 ## Running it
 
-Node.js 20.19 or newer and npm are the only requirements.
+In the stack there is nothing to install: `docker compose up --build` builds this dashboard into
+an nginx container that serves the bundle on <http://localhost:5173> and proxies `/api` to the
+API of the stack, so the page reaches the API of its own origin exactly as it does in
+development. That is the containerized server of MVP-10, documented in
+[deployment.md](deployment.md).
+
+To work on the dashboard itself, Node.js 20.19 or newer and npm are the only requirements.
 
 ```powershell
 cd frontend
@@ -47,6 +53,13 @@ are baked into the bundle and must never hold a secret, and changing one require
 | --- | --- | --- | --- |
 | `VITE_API_BASE_URL` | empty | Frontend build | Origin of the API. Empty means "the origin that served the dashboard", so the app calls `/api/v1/...` on itself |
 | `VITE_API_PROXY_TARGET` | `http://localhost:8082` | Dev and preview servers | Origin those two servers proxy `/api` to. It never reaches the browser bundle |
+| `API_PROXY_TARGET` | `http://logistics-api:8082` | Dashboard container | Origin the nginx server of the container proxies `/api` to. It is a runtime value of the container, substituted into its configuration when it starts, and it lives in the root `.env` rather than in this directory |
+
+The container is built with the same-origin default and never reads this directory's `.env`, so
+the two `VITE_*` values above are the ones a development server uses. An absolute
+`VITE_API_BASE_URL` baked into a bundle would make the whole containerized setup depend on CORS
+being enabled on the API, which is why the image keeps the same-origin path and the proxy target
+is the knob that moves.
 
 ### Why the default is a same-origin path
 

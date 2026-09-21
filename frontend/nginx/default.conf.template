@@ -1,0 +1,53 @@
+# Coobi Logistics - the server of the dashboard container (MVP-10.2).
+#
+# The image serves the bundle the browser loaded, so the dashboard talks to the origin that
+# served it and reaches the API through the /api location below. That is the same-origin setup
+# the Vite dev and preview servers provide (`frontend/.env.example`), with nginx in their place:
+# the API of MVP-5 and MVP-6 ships no CORS configuration on purpose, and nothing has to be
+# relaxed on it to make the stack work.
+#
+# The file is a template. The entry point of the image substitutes the environment of the
+# container into it before nginx starts, and `${API_PROXY_TARGET}` is the origin the API is
+# proxied to - `http://logistics-api:8082` by default, set by compose.yml.
+
+# Docker's embedded DNS, so the target of the proxy is resolved when a request arrives instead
+# of once when this container starts: recreating the API changes its address, and a restart of
+# one container must not require a restart of the other (MVP-10.3).
+resolver 127.0.0.11 valid=10s ipv6=off;
+
+server {
+    listen 8080;
+    server_name _;
+
+    root /usr/share/nginx/html;
+    index index.html;
+
+    # The dashboard is a single page, so a path the bundle does not carry is the page itself.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+
+    location /api/ {
+        # Set per request, so the address of the API is looked up again instead of being frozen
+        # in this configuration at startup.
+        set $api_upstream ${API_PROXY_TARGET};
+
+        # The request URI is passed through unchanged: the API owns its paths and this server
+        # rewrites nothing.
+        proxy_pass $api_upstream$request_uri;
+
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # `/api/v1/stream/events` and `/api/v1/stream/statistics` are Server-Sent Events that
+        # stay open for as long as the browser is connected, so their responses must not be
+        # buffered and must not be cut by a timeout that assumes a short request.
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_read_timeout 1h;
+        proxy_send_timeout 1h;
+    }
+}

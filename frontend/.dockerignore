@@ -1,0 +1,23 @@
+# Build context of frontend/Dockerfile (MVP-10.1).
+#
+# The image installs its dependencies from package-lock.json and builds the bundle itself, so
+# an installed tree and a previous build are excluded.
+node_modules/
+dist/
+dist-ssr/
+.vite/
+coverage/
+
+# Vite reads .env at build time, which is what the dev and preview servers use. The container
+# serves the bundle from its own origin and proxies /api to `API_PROXY_TARGET` of the root .env
+# instead, so the file is kept out of the image build: the image cannot be configured by one.
+.env
+.env.*
+
+# Local noise that never belongs in an image.
+*.log
+*.tmp
+.git/
+.gitignore
+.idea/
+.vscode/
