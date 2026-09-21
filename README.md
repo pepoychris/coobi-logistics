@@ -71,6 +71,16 @@ both of them. A counter that stays flat means no record reached that stage, rath
 number that only looks live.
 See [docs/observability.md](docs/observability.md).
 
+Testing and reliability are implemented (MVP-9): every minimum of the roadmap has a
+deterministic unit test that needs neither a broker nor a database, and what only fails against
+real infrastructure is verified against it - a Kafka broker for telemetry, alerts and the dead
+letter topic, the PostgreSQL of the stack for the migrations, the persisted state and the
+idempotency of a duplicate event id, and one smoke test that generates a scenario with the
+simulator of the generator and reads the processed result back through this API, over HTTP.
+The container tests are skipped with the reason Testcontainers reports on a machine without
+Docker, and a default `mvn test` neither compiles nor needs them.
+See [docs/testing-reliability.md](docs/testing-reliability.md).
+
 ## Configuration
 
 Configuration is environment-variable based. `.env.example` is the source of truth for
@@ -233,6 +243,29 @@ a stack that has only started its infrastructure reports both of them as down. T
 catalog, the queries worth running against a benchmark and the troubleshooting table live in
 [docs/observability.md](docs/observability.md).
 
+## Testing
+
+Every service has a unit suite that needs nothing but the JVM - no broker, no database - which
+is why it is the suite to run while working. The tests that only fail against real
+infrastructure are integration tests: they start the images of the local stack in containers
+and they are the only tests that need Docker.
+
+| Item | Value |
+| --- | --- |
+| Unit tests, one service | `mvn test -f services/<service>/pom.xml` |
+| Unit tests, every service | `mvn test` |
+| Integration tests | `mvn -Dintegration-tests test` |
+| Contract, layers and commands | [docs/testing-reliability.md](docs/testing-reliability.md) |
+
+The integration tests start `apache/kafka:4.3.1` and `postgres:18.6`, the two images
+`compose.yml` runs, and the smoke test starts the stream processor next to the API so that a
+generated telemetry scenario can be read back through the public API. The command runs from
+the root of the repository because of that: the aggregator `pom.xml` is what lets Maven resolve
+the processor and the generator from their build output instead of from their executable jars,
+and it stops at the `test` phase because `package` is what produces those jars.
+A machine without a Docker daemon skips the container tests with the reason Testcontainers
+reports, and the default `mvn test` neither compiles them nor resolves their dependencies.
+
 ## Event Generator
 
 `services/event-generator` simulates the fleet and produces the telemetry that the rest of
@@ -328,6 +361,7 @@ docker compose up -d
 | Health | `GET http://localhost:8081/actuator/health` |
 | Metrics | `GET http://localhost:8081/actuator/prometheus`: the events received, processed and rejected, the alerts per detection, the processing time and the Kafka client metrics (MVP-8) |
 | Tests | `.\services\stream-processor\mvnw.cmd -f services/stream-processor/pom.xml test` |
+| Integration tests | `mvn -Dintegration-tests verify -f services/stream-processor/pom.xml` - Kafka and PostgreSQL in containers: telemetry to alert, the dead letter topic, the migrations, the persistence and the idempotency (MVP-9.2 and MVP-9.3) |
 
 Invalid telemetry never stops the stream: the payload is inspected once and either reaches
 the two detections or is published to the dead letter topic carrying `originalEvent`,
@@ -379,6 +413,7 @@ docker compose up -d
 | Errors | RFC 9457 problem details: `400` for a parameter the client can correct, `404` for an unknown resource, `500` without internals |
 | Health | `GET http://localhost:8082/actuator/health` |
 | Tests | `.\services\logistics-api\mvnw.cmd -f services/logistics-api/pom.xml test` |
+| Integration tests | `mvn -Dintegration-tests verify` from the root of the repository - the full pipeline smoke test: generated telemetry, Kafka, the processor, PostgreSQL and these endpoints (MVP-9.4) |
 
 The field names and units of a vehicle are the ones of the version-1 location contract the
 services share, and the metadata of an alert is the `AlertData` of the alert contract,
