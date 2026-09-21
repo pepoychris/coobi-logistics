@@ -54,6 +54,12 @@ class StreamProcessorApplicationTests {
     }
 
     @Test
+    void bindsTheDocumentedStoppedThresholds() {
+        assertThat(processingProperties.getStoppedWindowSeconds()).isEqualTo(300L);
+        assertThat(processingProperties.getMovementThresholdMeters()).isEqualTo(50.0);
+    }
+
+    @Test
     void readsAndPublishesToTheVersionedTopics() {
         assertThat(kafkaTopicsProperties.locationTopic()).isEqualTo("logistics.vehicle.location.v1");
         assertThat(kafkaTopicsProperties.deadLetterTopic()).isEqualTo("logistics.vehicle.location.dlq.v1");

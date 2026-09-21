@@ -16,7 +16,7 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-2 - Stream processing in place.**
+**MVP-3 - Stateful stream processing in place.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -30,10 +30,11 @@ service that simulates a fleet of vehicles and publishes versioned location tele
 Kafka, with a configurable target rate, reproducible topics and a health endpoint. See
 [docs/event-generator.md](docs/event-generator.md).
 
-The stream processor is implemented (MVP-2): `services/stream-processor` is a Spring Boot
-Kafka Streams service that consumes that telemetry, validates it, routes invalid records to
-the dead letter topic and turns speed-limit crossings into alert events. See
-[docs/stream-processor.md](docs/stream-processor.md).
+The stream processor is implemented (MVP-2 and MVP-3): `services/stream-processor` is a
+Spring Boot Kafka Streams service that consumes that telemetry, validates it, routes invalid
+records to the dead letter topic, maintains the latest state of every vehicle in a Kafka
+Streams state store and turns speed-limit crossings and prolonged stops into alert events.
+See [docs/stream-processor.md](docs/stream-processor.md).
 
 The REST API and the frontend arrive in the following milestones, which are tracked in the
 implementation roadmap as milestones and issues.
@@ -87,10 +88,9 @@ exported shell variable overrides the value copied into `.env`. Because Compose
 interpolates `$` in `.env`, a literal dollar sign inside a value must be doubled:
 `POSTGRES_PASSWORD=pa$$word` resolves to the value `pa$word`. The remaining variables
 are consumed by the services: `KAFKA_BOOTSTRAP_SERVERS`, the vehicle simulator
-variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED_LIMIT` by
-the stream processor (MVP-2). `STOPPED_WINDOW_SECONDS` and `MOVEMENT_THRESHOLD_METERS` are
-part of the same contract but are reserved for the stopped-vehicle detection of MVP-3: no
-service reads them yet.
+variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED_LIMIT`,
+`STOPPED_WINDOW_SECONDS` and `MOVEMENT_THRESHOLD_METERS` by the stream processor
+(MVP-2 and MVP-3).
 
 `.env` is listed in `.gitignore` and must never be committed. No credential is
 versioned in this repository: `POSTGRES_PASSWORD` is documented with an empty value, and
@@ -256,16 +256,18 @@ docker compose up -d
 | --- | --- |
 | Consumes | `logistics.vehicle.location.v1` |
 | Produces | `logistics.vehicle.location.dlq.v1` (invalid records), `logistics.alert.v1` (alerts) |
-| Detection | `SPEED_LIMIT`, default 120 km/h; one alert per `NORMAL` to `SPEEDING` transition |
-| Alert contract | `AlertEvent`, version 1, `eventType=SPEEDING_DETECTED`, keyed by `vehicleId` |
+| Detection | `SPEED_LIMIT`, default 120 km/h; one alert per `NORMAL` to `SPEEDING` transition. `STOPPED_WINDOW_SECONDS`, default 300 s, and `MOVEMENT_THRESHOLD_METERS`, default 50 m; one alert per `MOVING` to `STOPPED` transition |
+| State | Latest state of every vehicle - position, speed, heading, last update and status - in a Kafka Streams state store keyed by `vehicleId` |
+| Alert contract | `AlertEvent`, version 1, `eventType` of `SPEEDING_DETECTED` or `VEHICLE_STOPPED_DETECTED`, keyed by `vehicleId` |
 | Health | `GET http://localhost:8081/actuator/health` |
 | Tests | `.\services\stream-processor\mvnw.cmd -f services/stream-processor/pom.xml test` |
 
 Invalid telemetry never stops the stream: the payload is inspected once and either reaches
-the speeding detection or is published to the dead letter topic carrying `originalEvent`,
-`error`, `failedAt` and `sourceTopic`. The speed state is kept per `vehicleId` in a Kafka
-Streams state store, so staying above the limit produces no further alert and a restart does
-not repeat a crossing that was already reported.
+the two detections or is published to the dead letter topic carrying `originalEvent`,
+`error`, `failedAt` and `sourceTopic`. Both detections keep their state per `vehicleId` in a
+Kafka Streams state store, so staying above the limit or standing still produces no further
+alert, and a restart continues from the restored state instead of repeating an alert that was
+already reported.
 
 Read [docs/stream-processor.md](docs/stream-processor.md) for the complete configuration
 contract, the validation rules, the alert contract and the troubleshooting table.
@@ -290,7 +292,7 @@ coobi-logistics/
 ```
 
 `services/event-generator` holds the MVP-1 implementation and `services/stream-processor`
-the MVP-2 implementation, each with its own Maven wrapper and its service documentation
+the MVP-2 and MVP-3 implementation, each with its own Maven wrapper and its service documentation
 ([docs/event-generator.md](docs/event-generator.md),
 [docs/stream-processor.md](docs/stream-processor.md)). The `logistics-api`, `frontend` and
 `infrastructure` directories are intentionally empty placeholders at this stage.

@@ -1,4 +1,4 @@
-# Coobi Logistics - stream-processor (MVP-2).
+# Coobi Logistics - stream-processor (MVP-2 and MVP-3).
 #
 # Configuration is environment-variable based. The variables written as
 # `${VARIABLE:default}` are the documented contract shared with `.env.example`
@@ -59,12 +59,17 @@ management:
 info:
   application:
     name: stream-processor
-    milestone: MVP-2
+    milestone: MVP-3
 
 coobi:
   processing:
     # Speed above which a vehicle is reported as speeding (MVP-2.3).
     speed-limit-kph: ${SPEED_LIMIT:120}
+    # Time a vehicle must remain effectively stationary before it is reported as
+    # stopped, and the total distance below which movement counts as no movement
+    # over that window (MVP-3.2). Both are read by the `vehicle-state` processor.
+    stopped-window-seconds: ${STOPPED_WINDOW_SECONDS:300}
+    movement-threshold-meters: ${MOVEMENT_THRESHOLD_METERS:50}
   kafka:
     topics:
       location: logistics.vehicle.location.v1

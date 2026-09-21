@@ -6,8 +6,8 @@ package com.coobi.logistics.streamprocessor.event;
  * <p>Each type carries the {@code eventType} it is serialized as and its severity, so a
  * producer cannot publish an alert whose type, event type and severity disagree.
  *
- * <p>{@link #SPEEDING} is produced by MVP-2.3. {@link #VEHICLE_STOPPED} is part of the
- * contract but is not produced yet: MVP-3 owns the stopped-vehicle detection.
+ * <p>{@link #SPEEDING} is produced by the speed-limit detection (MVP-2.3) and
+ * {@link #VEHICLE_STOPPED} by the stopped-vehicle detection (MVP-3.2).
  */
 public enum AlertType {
 

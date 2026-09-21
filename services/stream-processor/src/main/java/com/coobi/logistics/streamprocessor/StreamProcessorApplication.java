@@ -6,8 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationPropertiesScan;
 
 /**
  * Stream processor: consumes versioned vehicle telemetry from Kafka, validates it, routes
- * invalid events to the dead letter topic and turns speeding transitions into alerts
- * (MVP-2).
+ * invalid events to the dead letter topic, keeps the latest state of every vehicle and
+ * turns speeding and stopped-vehicle transitions into alerts (MVP-2 and MVP-3).
  *
  * <p>Kafka Streams is enabled by
  * {@link com.coobi.logistics.streamprocessor.config.KafkaStreamsConfiguration} rather than

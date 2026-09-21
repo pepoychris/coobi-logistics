@@ -9,8 +9,13 @@ import com.fasterxml.jackson.annotation.JsonPropertyOrder;
  * inherently thread-safe. The compact constructor rejects non-finite numbers, which the
  * JSON format cannot represent.
  *
- * @param speed observed speed in kilometres per hour
- * @param threshold configured limit the observation crossed, in kilometres per hour
+ * <p>The unit of the threshold follows the alert type, because each detection measures what
+ * it can: {@code SPEEDING} compares a speed with the speed limit in km/h and
+ * {@code VEHICLE_STOPPED} compares the distance covered with the movement threshold in
+ * metres. {@code docs/stream-processor.md} documents the pair per alert type.
+ *
+ * @param speed speed observed in the telemetry event, in kilometres per hour
+ * @param threshold configured threshold of the detection that produced the alert
  */
 @JsonPropertyOrder({"speed", "threshold"})
 public record AlertData(

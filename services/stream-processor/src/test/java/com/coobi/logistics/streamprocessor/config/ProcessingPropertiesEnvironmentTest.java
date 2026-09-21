@@ -14,15 +14,32 @@ import org.springframework.core.env.SystemEnvironmentPropertySource;
 import org.springframework.core.io.ClassPathResource;
 
 /**
- * MVP-2.3: the documented variable, not only the property key, configures the threshold.
+ * MVP-2.3 and MVP-3.2: the documented variables, not only the property keys, configure the
+ * thresholds.
  *
- * <p>The shipped {@code application.yml} is read here, so the test fails when the
- * {@code SPEED_LIMIT} placeholder is renamed or dropped.
+ * <p>The shipped {@code application.yml} is read here, so the test fails when a
+ * placeholder is renamed or dropped.
  */
 class ProcessingPropertiesEnvironmentTest {
 
     @Test
     void readsTheSpeedLimitFromTheDocumentedEnvironmentVariable() throws IOException {
+        ProcessingProperties properties = bind(Map.of("SPEED_LIMIT", "90"));
+
+        assertThat(properties.getSpeedLimitKph()).isEqualTo(90.0);
+    }
+
+    @Test
+    void readsTheStoppedThresholdsFromTheDocumentedEnvironmentVariables() throws IOException {
+        ProcessingProperties properties = bind(Map.of(
+                "STOPPED_WINDOW_SECONDS", "60",
+                "MOVEMENT_THRESHOLD_METERS", "200"));
+
+        assertThat(properties.getStoppedWindowSeconds()).isEqualTo(60L);
+        assertThat(properties.getMovementThresholdMeters()).isEqualTo(200.0);
+    }
+
+    private static ProcessingProperties bind(Map<String, Object> variables) throws IOException {
         StandardEnvironment environment = new StandardEnvironment();
         ConfigurationPropertySources.attach(environment);
         environment.getPropertySources().addLast(applicationYaml());
@@ -30,13 +47,11 @@ class ProcessingPropertiesEnvironmentTest {
         // not depend on how the machine running it is configured.
         environment
                 .getPropertySources()
-                .addFirst(new SystemEnvironmentPropertySource("documented", Map.of("SPEED_LIMIT", "90")));
+                .addFirst(new SystemEnvironmentPropertySource("documented", variables));
 
-        ProcessingProperties properties = Binder.get(environment)
+        return Binder.get(environment)
                 .bind("coobi.processing", ProcessingProperties.class)
                 .orElseThrow(() -> new IllegalStateException("coobi.processing did not bind"));
-
-        assertThat(properties.getSpeedLimitKph()).isEqualTo(90.0);
     }
 
     private static PropertySource<?> applicationYaml() throws IOException {
