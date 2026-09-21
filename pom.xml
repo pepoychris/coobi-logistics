@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>com.coobi.logistics</groupId>
+  <artifactId>coobi-logistics</artifactId>
+  <version>0.1.0-SNAPSHOT</version>
+  <packaging>pom</packaging>
+
+  <name>coobi-logistics</name>
+  <description>
+    Aggregator of the three services of the Coobi Logistics pipeline: the telemetry
+    simulator, the Kafka Streams processor and the read API.
+  </description>
+
+  <!--
+    This project only aggregates; it is not the parent of the services, and it carries no
+    configuration of its own. Every service keeps spring-boot-starter-parent as its
+    parent, its own `mvnw`, and its own dependency set, so `mvn -f services/<service>/pom.xml
+    test` keeps working exactly as it did before and nothing here can change what a service
+    builds.
+
+    It exists for the two things that cannot be expressed inside one service:
+
+    * MVP-9.4, the full pipeline smoke test, lives in logistics-api and starts the stream
+      processor in-process, so it needs the processor on its test classpath. Within one
+      reactor build Maven resolves that dependency from `target/classes` of the processor
+      module, which is what makes the test work without installing an executable (Spring
+      Boot repackaged) artifact that cannot be used as a library.
+    * one command that runs every unit suite and, with `-Dintegration-tests`, every
+      container-backed integration test of the pipeline.
+  -->
+  <modules>
+    <module>services/event-generator</module>
+    <module>services/stream-processor</module>
+    <module>services/logistics-api</module>
+  </modules>
+</project>
