@@ -38,7 +38,11 @@ The orchestrator may commit and merge only after all of the following are true:
    changes; no credentials or generated local state are included.
 
 Once the gate is green, the orchestrator commits the phase on its branch with a
-Conventional Commit message, switches to `develop`, and merges with `--no-ff` so the
-phase remains visible in history. The orchestrator then verifies `git status` and the
-merge result. Pushing to a remote or opening a pull request is a separate user-authorized
-operation and is not implied by this local merge step.
+Conventional Commit message, pushes that branch to the configured remote, and creates
+the pull request targeting `develop`. The orchestrator owns the PR lifecycle: it waits
+for the required CI/review checks, addresses any actionable feedback through the normal
+correction gate, and merges the approved PR into `develop` (using the repository's
+configured merge policy). It then verifies the local checkout, remote branch/PR state,
+and resulting merge commit. If remote credentials, CI, or repository permissions are
+unavailable, the orchestrator must report that blocker instead of silently treating a
+local merge as complete.
