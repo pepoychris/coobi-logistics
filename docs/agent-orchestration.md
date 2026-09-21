@@ -15,6 +15,11 @@ This project uses a phase-based workflow to keep implementation fast and focused
   inherit the orchestrator's model.
 - CodeGraph is initialized for structural navigation and impact checks; its local
   database is ignored and can be rebuilt with `codegraph init -i` on a new machine.
+- Once a phase implementer is launched, the orchestrator must leave it running until
+  it returns an explicit terminal result (completed, blocked, or errored). Timeouts,
+  slow progress, or intermediate inactivity are not reasons to interrupt the agent;
+  the orchestrator should wait, or send a non-destructive status nudge if needed.
+  Cleanup/interrupt is allowed only after that terminal result has been received.
 
 This workflow is deliberately conservative about spawning agents: larger context
 packets replace one-agent-per-subtask fan-out, reducing duplicate repository discovery,
