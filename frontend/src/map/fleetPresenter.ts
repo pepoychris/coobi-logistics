@@ -2,19 +2,22 @@
  * The map, without three.js in the room.
  *
  * Everything that decides what the fleet map shows lives here - which vehicles
- * are drawn in full and which are only acknowledged, where the camera is, which
- * trails exist, what a click selects, and when the procedural district has to
- * be laid out again. The renderer is an interface with one implementation that
- * talks to the GPU and one stand-in that records calls, so the rules of the map
- * are tested without a browser and the drawing code stays a thin translation of
- * them.
+ * are drawn in full and which are only acknowledged, which road each of them is
+ * standing on, where the camera is, which trails exist, what a click selects,
+ * and when the procedural district has to be laid out again. The renderer is an
+ * interface with one implementation that talks to the GPU and one stand-in that
+ * records calls, so the rules of the map are tested without a browser and the
+ * drawing code stays a thin translation of them.
  *
- * Two of those rules are worth naming, because they are what keeps the map
- * usable while a fleet is large:
+ * Three of those rules are worth naming, because they are what keeps the map
+ * usable while a fleet is large and believable while it is small:
  *
- * - the fleet is split into a drawn half and a faint cloud by
- *   {@link splitFleet}, so the number of mini vehicles never exceeds
- *   {@link MAX_RENDERED_VEHICLES}, however many vehicles report;
+ * - the fleet is split into a drawn half and a faint cloud by {@link splitFleet},
+ *   so the number of mini vehicles never exceeds {@link MAX_RENDERED_VEHICLES},
+ *   however many vehicles report;
+ * - every vehicle is seated on the road graph of the district by
+ *   {@link planTraffic} before it is drawn, so a vehicle is only ever seen on a
+ *   street and never on a block or a roof;
  * - changing an option - the visible count, the palette, the trails - never
  *   recreates the scene. A palette change repaints ground that is already
  *   there, and a count change adds and removes the mini vehicles that crossed
@@ -35,9 +38,20 @@ import {
   type GeoPoint,
   type LocalPoint,
 } from './projection'
-import { networkCoversExtent, normalizeDensity, type NetworkDensity } from './roadNetwork'
+import {
+  buildRoadNetwork,
+  DISTRICT_SEED,
+  MIN_DISTRICT_HALF_EXTENT,
+  narrowestRoadWidth,
+  networkCoversExtent,
+  normalizeDensity,
+  type NetworkDensity,
+  type RoadNetwork,
+} from './roadNetwork'
 import { DEFAULT_THEME_ID, isFleetThemeId, type FleetThemeId } from './theme'
+import { planTraffic, type TrafficEntry } from './traffic'
 import { VehicleLayer, type VehicleLayerStats, type VehicleNode, type VehicleNodeState } from './vehicleLayer'
+import { VEHICLE_LENGTH_METERS, VEHICLE_MARKER_PIXELS } from './vehicleMesh'
 
 /** Size of the drawing surface, in CSS pixels. */
 export interface ViewportSize {
@@ -50,6 +64,28 @@ export const TRAIL_POINTS = 14
 
 /** How much of the view the district leaves around the fleet, as a factor. */
 export const DISTRICT_MARGIN = 1.15
+
+/**
+ * How much smaller than the fleet the district may become before it is laid out
+ * again.
+ *
+ * The district follows the ground the reader is looking at: it grows when the
+ * fleet outgrows it, and it is redrawn smaller when the camera has come back so
+ * far in that the reader would be looking at a handful of enormous blocks.
+ */
+export const DISTRICT_SHRINK_FACTOR = 0.4
+
+/**
+ * Largest part of a road a mini vehicle may cover, as a fraction of its width.
+ *
+ * A mini vehicle is drawn at a size of its own so that a reader can see it
+ * however far the camera is, which is what makes a fleet of hundreds readable -
+ * but a van drawn wider than the street it is driving down would make the city
+ * look like a toy. So the drawn vehicle is capped at a fraction of the narrowest
+ * road of the district, and shrinks with the camera once the camera is far
+ * enough out for the cap to bite.
+ */
+export const MAX_VEHICLE_ROAD_SHARE = 0.4
 
 /** What the controls of the dashboard let a reader change. */
 export interface FleetOptions {
@@ -85,9 +121,14 @@ export interface VehicleTrail {
 /** What the ground of the map is drawn with. */
 export interface GroundLook {
   themeId: FleetThemeId
-  density: NetworkDensity
-  /** Half width of the district, in metres. A change of this lays it out again. */
-  halfExtent: number
+  /**
+   * The district itself.
+   *
+   * The presenter lays it out and the renderer draws what it is given, so the
+   * city a reader sees and the streets the fleet is placed on are the same
+   * object rather than two layouts that have to be kept in step.
+   */
+  network: RoadNetwork
 }
 
 /**
@@ -99,9 +140,14 @@ export interface GroundLook {
 export interface FleetRenderer {
   /** Creates the node of one vehicle that entered the drawn half of the fleet. */
   createNode(vehicle: Vehicle, state: VehicleNodeState): VehicleNode
-  /** Replaces the faint cloud with the vehicles that are outside the budget. */
-  drawCloud(points: readonly LocalPoint[], options: { visible: boolean }): void
-  /** Replaces the trails of the fleet. `scale` is the world size of one drawn vehicle. */
+  /**
+   * Replaces the faint cloud with the vehicles that are outside the budget.
+   *
+   * @param points where those vehicles are, in local metres
+   * @param options whether the cloud is drawn, and how big one of its dots is on screen
+   */
+  drawCloud(points: readonly LocalPoint[], options: { visible: boolean; sizePixels: number }): void
+  /** Replaces the trails of the fleet. `scale` is the world length of one drawn vehicle. */
   drawTrails(trails: readonly VehicleTrail[], scale: number): void
   /** Moves the camera and tells it how big the drawing surface is. */
   setView(view: FleetView, size: ViewportSize): void
@@ -161,7 +207,14 @@ export class FleetPresenter {
   private readonly renderer: FleetRenderer
   private readonly layer: VehicleLayer
   private readonly trails = new Map<string, LocalPoint[]>()
+  /** The fleet as the backend last reported it, by identifier. */
+  private readonly reported = new Map<string, Vehicle>()
+  /** Where the fleet reported itself, in the local metres of the map. */
+  private readonly points = new Map<string, LocalPoint>()
+  /** Where the fleet is drawn, which is always on a road of the district. */
   private readonly positions = new Map<string, LocalPoint>()
+  /** Which way the vehicle of each position is pointing, along its lane. */
+  private readonly headings = new Map<string, number>()
 
   private options: FleetOptions
   private selection: string | null = null
@@ -171,13 +224,14 @@ export class FleetPresenter {
   private view: FleetView | null = null
   private split: FleetSplit = { rendered: [], background: [], omitted: 0 }
   private tracked = 0
-  private districtHalfExtent = 0
+  private district: RoadNetwork
 
   constructor(renderer: FleetRenderer, options: Partial<FleetOptions> = {}) {
     this.renderer = renderer
     this.options = normalizeFleetOptions(options)
     this.layer = new VehicleLayer({ create: (vehicle, state) => renderer.createNode(vehicle, state) })
-    renderer.drawGround({ themeId: this.options.themeId, density: this.options.density, halfExtent: 0 })
+    this.district = this.layOutDistrict(MIN_DISTRICT_HALF_EXTENT)
+    renderer.drawGround({ themeId: this.options.themeId, network: this.district })
   }
 
   /** The options in force, already clamped. */
@@ -188,6 +242,11 @@ export class FleetPresenter {
   /** The camera, or `null` before a fleet has been fitted. */
   get currentView(): FleetView | null {
     return this.view ? { ...this.view } : null
+  }
+
+  /** The district the fleet is driving through. */
+  get currentDistrict(): RoadNetwork {
+    return this.district
   }
 
   /** The vehicle a reader selected, if any. */
@@ -215,12 +274,17 @@ export class FleetPresenter {
     const previous = this.options
     this.options = next
 
-    if (next.themeId !== previous.themeId || next.density !== previous.density) {
-      this.renderer.drawGround({
-        themeId: next.themeId,
-        density: next.density,
-        halfExtent: this.districtHalfExtent,
-      })
+    const repainted = next.themeId !== previous.themeId
+    const relaid = next.density !== previous.density
+    if (relaid) {
+      this.district = this.layOutDistrict(this.district.halfExtent)
+    }
+    if (repainted || relaid) {
+      this.renderer.drawGround({ themeId: next.themeId, network: this.district })
+    }
+    if (relaid) {
+      // New streets: the fleet is seated on them again before it is drawn.
+      this.plan()
     }
     if (next.trails !== previous.trails && !next.trails) {
       this.trails.clear()
@@ -264,30 +328,26 @@ export class FleetPresenter {
     this.fleet = [...vehicles]
     this.tracked = vehicles.length
 
-    const points: LocalPoint[] = []
-    for (const vehicle of vehicles) {
-      const point = this.place(vehicle)
-      if (point) {
-        points.push(point)
-      }
-    }
-
+    this.project()
+    this.ensureDistrict()
+    this.plan()
     if (this.options.followFleet) {
-      this.follow(points)
+      this.follow()
     }
-    this.ensureDistrict(points)
     return this.render()
   }
 
   /** Points the camera at the whole fleet. */
   fitToFleet(): void {
-    const fitted = fitView([...this.positions.values()], this.size.width, this.size.height)
+    const fitted = fitView([...this.points.values()], this.size.width, this.size.height)
     if (!fitted) {
       return
     }
     this.view = fitted
     this.renderer.setView(fitted, this.size)
-    this.ensureDistrict([...this.positions.values()])
+    if (this.ensureDistrict()) {
+      this.plan()
+    }
     this.render()
   }
 
@@ -303,7 +363,9 @@ export class FleetPresenter {
     }
     this.view = panView(this.view, deltaXPixels, deltaYPixels, this.size.height)
     this.renderer.setView(this.view, this.size)
-    this.ensureDistrict([...this.positions.values()])
+    if (this.ensureDistrict()) {
+      this.plan()
+    }
     this.render()
   }
 
@@ -321,6 +383,9 @@ export class FleetPresenter {
     const anchor = groundAt(this.view, offsetX, offsetY, this.size.width, this.size.height)
     this.view = zoomView(this.view, factor, anchor.x, anchor.y)
     this.renderer.setView(this.view, this.size)
+    if (this.ensureDistrict()) {
+      this.plan()
+    }
     this.render()
   }
 
@@ -342,7 +407,10 @@ export class FleetPresenter {
       return null
     }
     const target = groundAt(this.view, offsetX, offsetY, this.size.width, this.size.height)
-    const tolerance = metersPerPixel(this.view, this.size.height) * tolerancePixels
+    const tolerance = Math.max(
+      metersPerPixel(this.view, this.size.height) * tolerancePixels,
+      this.markerWorldLength(),
+    )
     let best: { vehicle: Vehicle; distance: number } | null = null
     for (const vehicle of this.split.rendered) {
       const point = this.positions.get(vehicle.vehicleId)
@@ -361,7 +429,10 @@ export class FleetPresenter {
   dispose(): void {
     this.layer.clear()
     this.trails.clear()
+    this.points.clear()
     this.positions.clear()
+    this.headings.clear()
+    this.reported.clear()
     this.renderer.dispose()
   }
 
@@ -377,13 +448,14 @@ export class FleetPresenter {
     this.split = splitFleet(this.fleet, this.options.visibleCount, this.selection)
     this.rememberTrails(this.split)
 
-    const scale = this.nodeScale()
+    const scale = this.markerWorldLength()
     const stats = this.layer.sync(this.split, (vehicle) => {
       const position = this.positions.get(vehicle.vehicleId) ?? { x: 0, y: 0 }
       return {
         selected: vehicle.vehicleId === this.selection,
         scale,
         trails: this.options.trails,
+        heading: this.headings.get(vehicle.vehicleId) ?? vehicle.heading,
         x: position.x,
         y: position.y,
       }
@@ -398,7 +470,10 @@ export class FleetPresenter {
         }
       }
     }
-    this.renderer.drawCloud(cloud, { visible: this.options.backgroundFleet })
+    this.renderer.drawCloud(cloud, {
+      visible: this.options.backgroundFleet,
+      sizePixels: this.cloudDotPixels(),
+    })
     this.renderer.drawTrails(this.trailList(), scale)
 
     return {
@@ -414,21 +489,50 @@ export class FleetPresenter {
   }
 
   /**
-   * @param vehicle the vehicle to place
-   * @returns its position in local metres, or `undefined` for an unusable position
+   * Turns the fleet the backend reported into positions in the local metres of
+   * the map, and remembers the vehicle each of them belongs to.
    */
-  private place(vehicle: Vehicle): LocalPoint | undefined {
-    if (!Number.isFinite(vehicle.latitude) || !Number.isFinite(vehicle.longitude)) {
-      return undefined
+  private project(): void {
+    this.points.clear()
+    this.reported.clear()
+    for (const vehicle of this.fleet) {
+      this.reported.set(vehicle.vehicleId, vehicle)
+      if (!Number.isFinite(vehicle.latitude) || !Number.isFinite(vehicle.longitude)) {
+        continue
+      }
+      if (!this.anchor) {
+        // The anchor is the first vehicle the dashboard ever saw, and it never
+        // moves: everything the map draws is a difference against it.
+        this.anchor = { latitude: vehicle.latitude, longitude: vehicle.longitude }
+      }
+      this.points.set(vehicle.vehicleId, projectPoint(vehicle, this.anchor))
     }
-    if (!this.anchor) {
-      // The anchor is the first vehicle the dashboard ever saw, and it never
-      // moves: everything the map draws is a difference against it.
-      this.anchor = { latitude: vehicle.latitude, longitude: vehicle.longitude }
+  }
+
+  /**
+   * Seats the fleet on the roads of the district.
+   *
+   * This is the step that keeps a vehicle off the buildings: what the backend
+   * reports is a position, and what the map draws is the nearest legal piece of
+   * road to it - shared with nothing else, unless the district has more vehicles
+   * than it has road.
+   */
+  private plan(): void {
+    this.positions.clear()
+    this.headings.clear()
+    const entries: TrafficEntry[] = []
+    for (const [vehicleId, point] of this.points) {
+      entries.push({
+        vehicleId,
+        x: point.x,
+        y: point.y,
+        heading: this.reported.get(vehicleId)?.heading,
+      })
     }
-    const point = projectPoint(vehicle, this.anchor)
-    this.positions.set(vehicle.vehicleId, point)
-    return point
+    for (const [vehicleId, placement] of planTraffic(this.district, entries)) {
+      this.positions.set(vehicleId, { x: placement.x, y: placement.y })
+      this.headings.set(vehicleId, placement.heading)
+    }
   }
 
   /**
@@ -468,7 +572,8 @@ export class FleetPresenter {
   }
 
   /** Keeps the camera on the fleet while the option is on, without fighting a drag. */
-  private follow(points: readonly LocalPoint[]): void {
+  private follow(): void {
+    const points = [...this.points.values()]
     if (points.length === 0) {
       return
     }
@@ -498,33 +603,81 @@ export class FleetPresenter {
     }
   }
 
-  /** Lays the district out again only when the fleet no longer fits in it. */
-  private ensureDistrict(points: readonly LocalPoint[]): void {
-    const bounds = boundsOf(points)
+  /**
+   * Lays the district out again only when the fleet no longer fits in it, or
+   * when the camera has come back in so far that the reader would be looking at
+   * a handful of enormous blocks.
+   *
+   * @returns whether the district was laid out again, which means the fleet has
+   *          to be seated on it before it is drawn
+   */
+  private ensureDistrict(): boolean {
+    const required = this.requiredHalfExtent()
+    const covered = networkCoversExtent(this.district.halfExtent, required)
+    if (covered && required >= this.district.halfExtent * DISTRICT_SHRINK_FACTOR) {
+      return false
+    }
+    this.district = this.layOutDistrict(Math.max(required, MIN_DISTRICT_HALF_EXTENT))
+    this.renderer.drawGround({ themeId: this.options.themeId, network: this.district })
+    return true
+  }
+
+  /**
+   * @returns the half width of the ground the map needs right now: the fleet,
+   *          and the piece of the world the camera is looking at, with room
+   *          around both
+   */
+  private requiredHalfExtent(): number {
+    const bounds = boundsOf([...this.points.values()])
     const viewExtent = Math.max(this.view?.halfWidth ?? 0, this.view?.halfHeight ?? 0)
     const fromBounds = bounds
       ? Math.max(Math.abs(bounds.minX), Math.abs(bounds.maxX), Math.abs(bounds.minY), Math.abs(bounds.maxY))
       : 0
-    const required = Math.max(fromBounds, viewExtent) * DISTRICT_MARGIN
-    if (networkCoversExtent(this.districtHalfExtent, required)) {
-      return
-    }
-    this.districtHalfExtent = Math.max(required, 1)
-    this.renderer.drawGround({
-      themeId: this.options.themeId,
+    return Math.max(fromBounds, viewExtent) * DISTRICT_MARGIN
+  }
+
+  /**
+   * @param halfExtent half width of the district to lay out
+   * @returns the district of that size, with the density the reader selected
+   */
+  private layOutDistrict(halfExtent: number): RoadNetwork {
+    return buildRoadNetwork({
+      seed: DISTRICT_SEED,
+      halfExtent,
       density: this.options.density,
-      halfExtent: this.districtHalfExtent,
     })
   }
 
   /**
-   * @returns how big one mini vehicle is in world metres, so that it keeps its
-   *          size on screen however far the camera is
+   * @returns the world length of one drawn mini vehicle
+   *
+   * A mini vehicle is normally drawn at the same size on screen whatever the
+   * camera does, which is what keeps a fleet of hundreds readable. The cap is
+   * the one thing that wins over it: a vehicle is never drawn longer than a
+   * fraction of the narrowest street of the district, so the city never looks
+   * like it is made of vans.
    */
-  private nodeScale(): number {
+  private markerWorldLength(): number {
     if (!this.view) {
-      return 1
+      return VEHICLE_LENGTH_METERS
     }
-    return metersPerPixel(this.view, this.size.height)
+    const perPixel = metersPerPixel(this.view, this.size.height)
+    const wanted = perPixel * VEHICLE_MARKER_PIXELS
+    const cap = narrowestRoadWidth(this.district) * MAX_VEHICLE_ROAD_SHARE
+    return Math.max(VEHICLE_LENGTH_METERS, Math.min(wanted, cap))
+  }
+
+  /**
+   * @returns how big one dot of the faint cloud is on screen, in CSS pixels
+   *
+   * The cloud is drawn at the size of a mini vehicle, so that the vehicles the
+   * budget draws and the ones it merely acknowledges read as the same fleet.
+   */
+  private cloudDotPixels(): number {
+    if (!this.view) {
+      return VEHICLE_MARKER_PIXELS * 0.55
+    }
+    const perPixel = metersPerPixel(this.view, this.size.height)
+    return Math.max(1.5, this.markerWorldLength() / perPixel)
   }
 }
