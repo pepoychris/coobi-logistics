@@ -1,0 +1,88 @@
+# Coobi Logistics - logistics-api (MVP-5).
+#
+# Configuration is environment-variable based. The variables written as
+# `${VARIABLE:default}` are the documented contract shared with `.env.example`
+# and README.md; every other entry is a default that only this service needs and
+# that can still be overridden with relaxed binding (`SPRING_DATASOURCE_*`,
+# `COOBI_STATISTICS_...`, `SERVER_PORT`).
+#
+# A missing or invalid value aborts startup instead of degrading silently
+# (Global Rule 11).
+
+spring:
+  application:
+    name: logistics-api
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  # Read-only access to the database of the local stack (compose.yml). The same
+  # `POSTGRES_*` names the Compose service uses are the fallback, so one `.env`
+  # configures the whole stack; the standard `SPRING_DATASOURCE_*` names win.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/${POSTGRES_DB:logistics}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:logistics}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD:}}
+    hikari:
+      pool-name: logistics-api
+      # A reader that answers page requests, not a fan-out writer.
+      maximum-pool-size: 5
+      # The API never writes: a connection that tries to is a defect, not a
+      # configuration choice, so the pool refuses instead of hiding it.
+      read-only: true
+  # The schema is owned by the stream-processor migrations (MVP-4) and by nothing
+  # else. This service ships no migration and therefore depends on no migration
+  # engine; if an entity is ever mapped to a table that does not exist, the
+  # endpoints fail loudly instead of creating a second schema history.
+  jpa:
+    hibernate:
+      ddl-auto: none
+    # Entities are detached DTO factories here; nothing reads them lazily outside
+    # a transaction.
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          # Timestamps are `timestamp with time zone`, read and written as UTC.
+          time_zone: UTC
+  # Error responses are RFC 9457 problem details (see docs/logistics-api.md).
+  mvc:
+    problemdetails:
+      enabled: true
+
+server:
+  # The generator keeps 8080 and the stream processor 8081, so the three services
+  # run side by side locally.
+  port: 8082
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: logistics-api
+    milestone: MVP-5
+
+coobi:
+  statistics:
+    # MVP-5.4: `processedEvents` and `eventsPerSecond` are not invented for the
+    # response; they are read from the Kafka Streams counters the stream processor
+    # already exposes over Actuator. When that service is unreachable - or does not
+    # expose the metric - both fields are reported as `null` instead of a number
+    # that would look live and be wrong.
+    stream-processor:
+      metrics-url: ${STREAM_PROCESSOR_METRICS_URL:http://localhost:8081/actuator/metrics}
+      processed-events-metric: kafka.streams.process.total
+      timeout: 2s
+
+logging:
+  level:
+    com.coobi.logistics.logisticsapi: INFO
