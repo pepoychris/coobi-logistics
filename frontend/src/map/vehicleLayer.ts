@@ -20,10 +20,12 @@ import type { FleetSplit } from './budget'
 export interface VehicleNodeState {
   /** Whether this is the vehicle the reader selected. */
   selected: boolean
-  /** Size of the mini vehicle in world metres, which is what fixes its size on screen. */
+  /** Length of the mini vehicle in world metres, which is what fixes its size on screen. */
   scale: number
   /** Whether the trails of the fleet are drawn. */
   trails: boolean
+  /** Heading of the vehicle along its road, in degrees clockwise from north. */
+  heading: number
   /** Where the vehicle is, in the local metres of the map. */
   x: number
   y: number
@@ -81,6 +83,7 @@ function isSameView(previous: VehicleNodeState, next: VehicleNodeState): boolean
     previous.selected === next.selected &&
     previous.scale === next.scale &&
     previous.trails === next.trails &&
+    previous.heading === next.heading &&
     previous.x === next.x &&
     previous.y === next.y
   )

@@ -43,7 +43,7 @@ class RecordingFactory implements VehicleNodeFactory {
   }
 }
 
-const STATE: VehicleNodeState = { selected: false, scale: 1, trails: true, x: 0, y: 0 }
+const STATE: VehicleNodeState = { selected: false, scale: 1, trails: true, heading: 0, x: 0, y: 0 }
 
 function stateOf(overrides: Partial<VehicleNodeState> = {}): (entry: Vehicle) => VehicleNodeState {
   return () => ({ ...STATE, ...overrides })

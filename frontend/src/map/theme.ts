@@ -29,6 +29,10 @@ export interface FleetTheme {
   block: string
   /** Outlines of the district blocks. */
   blockEdge: string
+  /** Roofs of the buildings standing on the blocks. */
+  building: string
+  /** The offset a building throws on the ground, which is what makes it look tall. */
+  buildingShadow: string
   /** Green areas inside the district. */
   park: string
   /** Water, when the palette has a channel. */
@@ -53,14 +57,6 @@ export interface FleetTheme {
   ink: string
 }
 
-/**
- * Where the depot of the procedural district sits, in local metres.
- *
- * It is the origin of the projection (the first vehicle the dashboard saw), so
- * the depot a reader sees is the place the fleet started from.
- */
-export const DEPOT_RADIUS_METERS = 260
-
 export const FLEET_THEMES: readonly FleetTheme[] = [
   {
     id: 'night-ops',
@@ -69,6 +65,8 @@ export const FLEET_THEMES: readonly FleetTheme[] = [
     background: '#0c100f',
     block: '#1a2321',
     blockEdge: '#0f1614',
+    building: '#2d3d38',
+    buildingShadow: '#070b0a',
     park: '#1b3025',
     water: '#152736',
     depot: '#463419',
@@ -88,6 +86,8 @@ export const FLEET_THEMES: readonly FleetTheme[] = [
     background: '#f4f5f2',
     block: '#e8ebe5',
     blockEdge: '#c9cfc4',
+    building: '#fbfcfa',
+    buildingShadow: '#b9c0b4',
     park: '#dbe8d6',
     water: '#d3e3ec',
     depot: '#fadfc0',
@@ -107,6 +107,8 @@ export const FLEET_THEMES: readonly FleetTheme[] = [
     background: '#111015',
     block: '#191821',
     blockEdge: '#262535',
+    building: '#2a2939',
+    buildingShadow: '#0b0a10',
     park: '#16211f',
     water: '#161f2d',
     depot: '#33241c',

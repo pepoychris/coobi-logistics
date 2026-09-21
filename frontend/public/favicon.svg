@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Coobi Logistics">
+  <rect width="64" height="64" rx="15" fill="#0c100f"/>
+  <rect x="0" y="46" width="64" height="18" fill="#232c2a"/>
+  <rect x="4" y="54" width="12" height="2.4" rx="1.2" fill="#6b7d78"/>
+  <rect x="22" y="54" width="12" height="2.4" rx="1.2" fill="#6b7d78"/>
+  <rect x="40" y="54" width="12" height="2.4" rx="1.2" fill="#6b7d78"/>
+  <rect x="9" y="15" width="30" height="21" rx="3" fill="#4ade80"/>
+  <rect x="11.5" y="18.5" width="25" height="5" rx="2.5" fill="#2f6b4c"/>
+  <path d="M39 22h6.5l7 6.5V36H39z" fill="#86efac"/>
+  <rect x="42" y="25" width="7" height="5" rx="1.5" fill="#0c100f"/>
+  <rect x="50.5" y="29.5" width="3" height="4" rx="1.2" fill="#fff3c4"/>
+  <circle cx="19" cy="41.5" r="5" fill="#0c100f" stroke="#cbd5d1" stroke-width="2.2"/>
+  <circle cx="45" cy="41.5" r="5" fill="#0c100f" stroke="#cbd5d1" stroke-width="2.2"/>
+</svg>

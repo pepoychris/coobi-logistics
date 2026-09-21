@@ -5,6 +5,7 @@ import type { Vehicle } from '../../api/types'
 import { MAX_RENDERED_VEHICLES } from '../budget'
 import {
   FleetPresenter,
+  MAX_VEHICLE_ROAD_SHARE,
   TRAIL_POINTS,
   type FleetRenderer,
   type GroundLook,
@@ -12,7 +13,9 @@ import {
   type ViewportSize,
 } from '../fleetPresenter'
 import type { FleetView, LocalPoint } from '../projection'
+import { insideBuilding, narrowestRoadWidth, onRoadSurface } from '../roadNetwork'
 import type { VehicleNode, VehicleNodeState } from '../vehicleLayer'
+import { VEHICLE_LENGTH_METERS } from '../vehicleMesh'
 
 /**
  * A stand-in for the renderer that records what the map asked it to do.
@@ -24,7 +27,7 @@ import type { VehicleNode, VehicleNodeState } from '../vehicleLayer'
 class RecordingRenderer implements FleetRenderer {
   readonly nodes = new Map<string, { updates: number; removed: boolean; state: VehicleNodeState }>()
   created = 0
-  clouds: { points: readonly LocalPoint[]; visible: boolean }[] = []
+  clouds: { points: readonly LocalPoint[]; visible: boolean; sizePixels: number }[] = []
   trails: { list: readonly VehicleTrail[]; scale: number }[] = []
   views: FleetView[] = []
   resizes: ViewportSize[] = []
@@ -46,8 +49,8 @@ class RecordingRenderer implements FleetRenderer {
     }
   }
 
-  drawCloud(points: readonly LocalPoint[], options: { visible: boolean }): void {
-    this.clouds.push({ points: [...points], visible: options.visible })
+  drawCloud(points: readonly LocalPoint[], options: { visible: boolean; sizePixels: number }): void {
+    this.clouds.push({ points: [...points], visible: options.visible, sizePixels: options.sizePixels })
   }
 
   drawTrails(list: readonly VehicleTrail[], scale: number): void {
@@ -159,13 +162,47 @@ describe('the presenter of the fleet map', () => {
     const created = renderer.created
     const updates = [...renderer.nodes.values()].reduce((total, node) => total + node.updates, 0)
 
-    map.zoomAt(0, 0, 0.5)
+    // Close enough in that a mini vehicle is no longer capped by the width of
+    // the street it drives down, so the camera does change how it is drawn.
+    map.zoomAt(0, 0, 0.2)
     map.panBy(40, -20)
 
     expect(renderer.created).toBe(created)
     expect(renderer.disposals).toBe(0)
     // Zooming and panning re-dress what is drawn; they never rebuild it.
     expect([...renderer.nodes.values()].reduce((total, node) => total + node.updates, 0)).toBeGreaterThan(updates)
+  })
+
+  it('draws every mini vehicle on a road of the district, and none on a building', () => {
+    const renderer = new RecordingRenderer()
+    const map = presenter(renderer, { visibleCount: 100 })
+    // A fleet that reports itself inside one block, which is what a cluster of
+    // vehicles looks like when the telemetry of a whole depot is read at once.
+    const crowded = Array.from({ length: 240 }, (_, index) =>
+      vehicle({
+        vehicleId: `TRUCK-${String(index).padStart(3, '0')}`,
+        latitude: 39.4699 + (index % 3) * 0.00002,
+        longitude: -0.3763 + (index % 5) * 0.00002,
+      }),
+    )
+
+    map.update(crowded)
+
+    const district = map.currentDistrict
+    const states = [...renderer.nodes.values()].map((node) => node.state)
+    expect(states).toHaveLength(100)
+    // A mini vehicle is never drawn longer than a fraction of the narrowest
+    // street of the district, so the city never looks like it is made of vans.
+    const cap = Math.max(VEHICLE_LENGTH_METERS, narrowestRoadWidth(district) * MAX_VEHICLE_ROAD_SHARE)
+    for (const state of states) {
+      expect(onRoadSurface(district, state)).toBe(true)
+      expect(insideBuilding(district, state)).toBe(false)
+      expect(state.scale).toBeLessThanOrEqual(cap)
+    }
+    // And the cloud outside the budget is on the roads as well.
+    for (const point of renderer.lastCloud?.points ?? []) {
+      expect(onRoadSurface(district, point)).toBe(true)
+    }
   })
 
   it('fits the whole fleet in the view when it follows', () => {

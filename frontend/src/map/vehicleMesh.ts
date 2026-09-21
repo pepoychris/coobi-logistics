@@ -28,6 +28,22 @@ export const VEHICLE_WIDTH_METERS = 2.2
 /** How long the mini vehicle is drawn on screen, in CSS pixels. */
 export const VEHICLE_MARKER_PIXELS = 17
 
+/**
+ * How far the mini vehicle is turned to point at a heading.
+ *
+ * The geometry of the vehicle is built facing east - the cab is the end of it
+ * that lies towards the positive `x` of the mesh - while the heading of the
+ * contract is measured clockwise from north. A vehicle reported heading east is
+ * the geometry as it comes, and one reported heading north is a quarter turn
+ * further round.
+ *
+ * @param heading degrees clockwise from north
+ * @returns the rotation to apply around the depth axis, in radians
+ */
+export function meshRotationRadians(heading: number): number {
+  return ((90 - heading) * Math.PI) / 180
+}
+
 /** The colours of one mini vehicle. */
 export interface VehiclePaint {
   body: string
