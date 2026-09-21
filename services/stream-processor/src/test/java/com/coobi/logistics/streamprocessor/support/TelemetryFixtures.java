@@ -22,6 +22,14 @@ public final class TelemetryFixtures {
 
     public static final Instant TIMESTAMP = Instant.parse("2026-09-21T09:15:00.123Z");
 
+    /** Coordinates of the demonstration trajectory (Valencia, Spain). */
+    public static final double DEMO_LATITUDE = 39.4699;
+
+    public static final double DEMO_LONGITUDE = -0.3763;
+
+    /** Heading of the demonstration trajectory, in degrees clockwise from north. */
+    public static final double DEMO_HEADING = 214.5;
+
     private static ValidatorFactory validatorFactory;
 
     private TelemetryFixtures() {
@@ -52,7 +60,7 @@ public final class TelemetryFixtures {
 
     /** A version-1 location event with the demonstration coordinates. */
     public static String payload(String vehicleId, double speed) {
-        return payload(vehicleId, speed, 39.4699, -0.3763);
+        return payload(vehicleId, TIMESTAMP, speed, DEMO_LATITUDE, DEMO_LONGITUDE);
     }
 
     /**
@@ -61,13 +69,22 @@ public final class TelemetryFixtures {
      * valid but violates the contract (for example a latitude of 91 degrees).
      */
     public static String payload(String vehicleId, double speed, double latitude, double longitude) {
+        return payload(vehicleId, TIMESTAMP, speed, latitude, longitude);
+    }
+
+    /**
+     * A version-1 location event at an explicit instant, so a test can drive a five-minute
+     * stopped window with telemetry of its own timeline instead of waiting.
+     */
+    public static String payload(
+            String vehicleId, Instant timestamp, double speed, double latitude, double longitude) {
         return serialize(new VehicleLocationEvent(
                 UUID.randomUUID(),
                 VehicleLocationEvent.EVENT_TYPE_VEHICLE_LOCATION_UPDATED,
                 VehicleLocationEvent.CURRENT_VERSION,
                 vehicleId,
-                TIMESTAMP,
-                new VehicleLocationData(latitude, longitude, speed, 214.5)));
+                timestamp,
+                new VehicleLocationData(latitude, longitude, speed, DEMO_HEADING)));
     }
 
     public static String serialize(Object value) {

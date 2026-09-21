@@ -3,10 +3,12 @@ package com.coobi.logistics.streamprocessor.processing;
 import com.coobi.logistics.streamprocessor.config.KafkaTopicsProperties;
 import com.coobi.logistics.streamprocessor.config.ProcessingProperties;
 import com.coobi.logistics.streamprocessor.event.DeadLetterEvent;
+import com.coobi.logistics.streamprocessor.event.VehicleLocationEvent;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validator;
 import java.time.Clock;
+import java.time.Duration;
 import org.apache.kafka.common.serialization.Serdes;
 import org.apache.kafka.streams.StreamsBuilder;
 import org.apache.kafka.streams.kstream.Consumed;
@@ -17,7 +19,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 /**
- * The Kafka Streams topology of the processor (MVP-2.1 to MVP-2.3).
+ * The Kafka Streams topology of the processor (MVP-2.1 to MVP-2.4 and MVP-3.1 to MVP-3.2).
  *
  * <pre>
  * logistics.vehicle.location.v1
@@ -25,7 +27,8 @@ import org.springframework.context.annotation.Configuration;
  *      -> accepted-telemetry         valid events
  *         -> accepted-events         deserialize once
  *            -> speeding-detection   NORMAL -&gt; SPEEDING transition
- *               -> logistics.alert.v1
+ *            -> vehicle-state        latest state per vehicle, MOVING -&gt; STOPPED
+ *               -> alerts            -> logistics.alert.v1
  *      -> rejected-telemetry         invalid events
  *         -> dead-letter-events      originalEvent / error / failedAt / sourceTopic
  *            -> logistics.vehicle.location.dlq.v1
@@ -34,6 +37,11 @@ import org.springframework.context.annotation.Configuration;
  * <p>Validation happens once, in the validation node, and the two branches only read its
  * result. Both branches are terminal sinks, so an invalid record cannot influence the
  * records behind it and the stream keeps processing after a rejection.
+ *
+ * <p>The accepted events feed two independent detections. Both are stateful and keyed by
+ * {@code vehicleId}, each with its own state store, and both publish to the same alert
+ * topic through one merged sink, so the alert contract and the topic wiring stay unchanged
+ * while the two state machines can never interfere with each other.
  */
 @Configuration(proxyBeanMethods = false)
 public class TelemetryTopologyConfiguration {
@@ -53,7 +61,12 @@ public class TelemetryTopologyConfiguration {
             Clock processingClock) {
 
         TelemetryInspector inspector = new TelemetryInspector(objectMapper, validator);
+        StoppedVehicleDetector stoppedVehicleDetector = new StoppedVehicleDetector(
+                Duration.ofSeconds(processingProperties.getStoppedWindowSeconds()),
+                processingProperties.getMovementThresholdMeters());
+
         streamsBuilder.addStateStore(SpeedingAlertProcessor.stateStore());
+        streamsBuilder.addStateStore(VehicleStateProcessor.stateStore());
 
         KStream<String, TelemetryInspection> inspected = streamsBuilder
                 .stream(topics.locationTopic(), Consumed.with(Serdes.String(), Serdes.String()))
@@ -64,12 +77,20 @@ public class TelemetryTopologyConfiguration {
         KStream<String, TelemetryInspection> rejected = inspected.filterNot(
                 (key, inspection) -> inspection.isValid(), Named.as("rejected-telemetry"));
 
-        KStream<String, String> alerts = accepted
-                .mapValues((key, inspection) -> inspection.event(), Named.as("accepted-events"))
-                .process(
-                        SpeedingAlertProcessor.supplier(processingProperties.getSpeedLimitKph(), objectMapper),
-                        Named.as(SpeedingAlertProcessor.PROCESSOR_NAME),
-                        SpeedingAlertProcessor.STATE_STORE_NAME);
+        KStream<String, VehicleLocationEvent> acceptedEvents =
+                accepted.mapValues((key, inspection) -> inspection.event(), Named.as("accepted-events"));
+
+        KStream<String, String> speedingAlerts = acceptedEvents.process(
+                SpeedingAlertProcessor.supplier(processingProperties.getSpeedLimitKph(), objectMapper),
+                Named.as(SpeedingAlertProcessor.PROCESSOR_NAME),
+                SpeedingAlertProcessor.STATE_STORE_NAME);
+
+        KStream<String, String> stoppedAlerts = acceptedEvents.process(
+                VehicleStateProcessor.supplier(stoppedVehicleDetector, objectMapper),
+                Named.as(VehicleStateProcessor.PROCESSOR_NAME),
+                VehicleStateProcessor.STATE_STORE_NAME);
+
+        KStream<String, String> alerts = speedingAlerts.merge(stoppedAlerts, Named.as("alerts"));
         alerts.to(topics.alertTopic(), Produced.with(Serdes.String(), Serdes.String()));
 
         rejected
