@@ -74,13 +74,18 @@ info:
 coobi:
   statistics:
     # MVP-5.4: `processedEvents` and `eventsPerSecond` are not invented for the
-    # response; they are read from the Kafka Streams counters the stream processor
-    # already exposes over Actuator. When that service is unreachable - or does not
-    # expose the metric - both fields are reported as `null` instead of a number
-    # that would look live and be wrong.
+    # response; they are read from the counter the stream processor publishes over
+    # Actuator (MVP-8.1). When that service is unreachable - or does not expose the
+    # metric - both fields are reported as `null` instead of a number that would look
+    # live and be wrong.
+    #
+    # The metric is the counter of the pipeline itself rather than a Kafka Streams
+    # metric: the Micrometer name of a stream-thread metric (`kafka.stream.thread.*`)
+    # belongs to the binding library and changes with it, while this name is the
+    # contract of the processor, documented in docs/observability.md.
     stream-processor:
       metrics-url: ${STREAM_PROCESSOR_METRICS_URL:http://localhost:8081/actuator/metrics}
-      processed-events-metric: kafka.streams.process.total
+      processed-events-metric: logistics_events_processed_total
       timeout: 2s
   # MVP-6: what a browser may receive, and what it may cost.
   #

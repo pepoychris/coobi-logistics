@@ -42,6 +42,10 @@ import org.slf4j.LoggerFactory;
  * <p>A state document that cannot be read back is logged and treated as absent, so a
  * single damaged entry restarts the window of one vehicle instead of failing the stream
  * for every vehicle behind it.
+ *
+ * <p>Every record of this step is timed and every forwarded alert is counted (MVP-8.1), so
+ * the state machine, the state-store write, the database write and the alert contract are all
+ * inside the measured window.
  */
 public final class VehicleStateProcessor implements Processor<String, VehicleLocationEvent, String, String> {
 
@@ -53,15 +57,20 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
     private final StoppedVehicleDetector detector;
     private final ObjectMapper objectMapper;
     private final TelemetryPersistence persistence;
+    private final TelemetryMetrics metrics;
 
     private ProcessorContext<String, String> context;
     private KeyValueStore<String, String> state;
 
     public VehicleStateProcessor(
-            StoppedVehicleDetector detector, ObjectMapper objectMapper, TelemetryPersistence persistence) {
+            StoppedVehicleDetector detector,
+            ObjectMapper objectMapper,
+            TelemetryPersistence persistence,
+            TelemetryMetrics metrics) {
         this.detector = Objects.requireNonNull(detector, "detector must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.persistence = Objects.requireNonNull(persistence, "persistence must not be null");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     /**
@@ -75,8 +84,11 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
     }
 
     public static ProcessorSupplier<String, VehicleLocationEvent, String, String> supplier(
-            StoppedVehicleDetector detector, ObjectMapper objectMapper, TelemetryPersistence persistence) {
-        return () -> new VehicleStateProcessor(detector, objectMapper, persistence);
+            StoppedVehicleDetector detector,
+            ObjectMapper objectMapper,
+            TelemetryPersistence persistence,
+            TelemetryMetrics metrics) {
+        return () -> new VehicleStateProcessor(detector, objectMapper, persistence, metrics);
     }
 
     @Override
@@ -87,6 +99,10 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
 
     @Override
     public void process(Record<String, VehicleLocationEvent> record) {
+        metrics.processingDuration().record(() -> advance(record));
+    }
+
+    private void advance(Record<String, VehicleLocationEvent> record) {
         VehicleLocationEvent event = record.value();
         String vehicleId = event.vehicleId();
         VehicleState previous = read(vehicleId);
@@ -150,6 +166,7 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
         // cannot leave an alert in the topic without its row.
         persistence.recordAlert(alert);
         context.forward(new Record<>(event.vehicleId(), payload, record.timestamp(), record.headers()));
+        metrics.alertGenerated(AlertType.VEHICLE_STOPPED);
         log.info(
                 "stopped vehicle detected vehicle-id={} window={} movement-threshold={} alert-id={}",
                 event.vehicleId(),

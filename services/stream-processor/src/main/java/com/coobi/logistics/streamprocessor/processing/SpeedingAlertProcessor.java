@@ -36,6 +36,10 @@ import org.slf4j.LoggerFactory;
  * <p>An accepted alert is also stored in PostgreSQL before it is published (MVP-4.3). The
  * insert is keyed by the unique {@code event_id} of the alert, so a replayed record is a
  * no-op instead of a duplicate row.
+ *
+ * <p>Every record of this step is timed and every forwarded alert is counted (MVP-8.1), so
+ * the state machine, the persistence write and the alert contract are all inside the
+ * measured window.
  */
 public final class SpeedingAlertProcessor implements Processor<String, VehicleLocationEvent, String, String> {
 
@@ -47,15 +51,20 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
     private final double speedLimitKph;
     private final ObjectMapper objectMapper;
     private final TelemetryPersistence persistence;
+    private final TelemetryMetrics metrics;
 
     private ProcessorContext<String, String> context;
     private KeyValueStore<String, String> state;
 
     public SpeedingAlertProcessor(
-            double speedLimitKph, ObjectMapper objectMapper, TelemetryPersistence persistence) {
+            double speedLimitKph,
+            ObjectMapper objectMapper,
+            TelemetryPersistence persistence,
+            TelemetryMetrics metrics) {
         this.speedLimitKph = speedLimitKph;
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
         this.persistence = Objects.requireNonNull(persistence, "persistence must not be null");
+        this.metrics = Objects.requireNonNull(metrics, "metrics must not be null");
     }
 
     /**
@@ -69,8 +78,11 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
     }
 
     public static ProcessorSupplier<String, VehicleLocationEvent, String, String> supplier(
-            double speedLimitKph, ObjectMapper objectMapper, TelemetryPersistence persistence) {
-        return () -> new SpeedingAlertProcessor(speedLimitKph, objectMapper, persistence);
+            double speedLimitKph,
+            ObjectMapper objectMapper,
+            TelemetryPersistence persistence,
+            TelemetryMetrics metrics) {
+        return () -> new SpeedingAlertProcessor(speedLimitKph, objectMapper, persistence, metrics);
     }
 
     @Override
@@ -81,6 +93,10 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
 
     @Override
     public void process(Record<String, VehicleLocationEvent> record) {
+        metrics.processingDuration().record(() -> advance(record));
+    }
+
+    private void advance(Record<String, VehicleLocationEvent> record) {
         VehicleLocationEvent event = record.value();
         String vehicleId = event.vehicleId();
         VehicleSpeedState previous = VehicleSpeedState.from(state.get(vehicleId));
@@ -126,6 +142,7 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
         // has no row behind it.
         persistence.recordAlert(alert);
         context.forward(new Record<>(event.vehicleId(), payload, record.timestamp(), record.headers()));
+        metrics.alertGenerated(AlertType.SPEEDING);
         log.info(
                 "speeding detected vehicle-id={} speed={} speed-limit={} alert-id={}",
                 event.vehicleId(),

@@ -8,6 +8,7 @@ import com.coobi.logistics.streamprocessor.event.AlertEvent;
 import com.coobi.logistics.streamprocessor.support.RecordingPersistence;
 import com.coobi.logistics.streamprocessor.support.TelemetryFixtures;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -149,7 +150,8 @@ class TelemetryPersistenceTopologyTest {
                         processing,
                         topics,
                         Clock.fixed(FAILED_AT, ZoneOffset.UTC),
-                        persistence);
+                        persistence,
+                        new TelemetryMetrics(new SimpleMeterRegistry()));
 
         TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streamsConfiguration());
         drivers.add(driver);

@@ -72,18 +72,38 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        # `metrics` is the JSON view used by the logistics-api statistics endpoint (MVP-5.4);
+        # `prometheus` is the exposition format Prometheus scrapes (MVP-8.1 and MVP-8.2).
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
   info:
     env:
       enabled: true
+  metrics:
+    # The Kafka Streams binder is registered by Spring Boot for the `StreamsBuilderFactoryBean`
+    # of this service, so the topology publishes its own metrics next to the ones above
+    # (MVP-8.3): kafka.streams.* (process-total, process-rate, commit-total),
+    # kafka.consumer.* (including fetch-manager records-lag-max) and the clients of the streams.
+    # They are JMX-derived, so they appear under /actuator/metrics and /actuator/prometheus
+    # with dotted and underscored names respectively.
+    tags:
+      # Distinguishes the two services of the pipeline in one Prometheus database, which is
+      # what lets a dashboard compare them without knowing which target a series came from.
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        # The export of a registry is opt-in, so the endpoint that renders
+        # /actuator/prometheus is requested explicitly here instead of relying on the
+        # auto-configuration being picked up by accident.
+        enabled: true
 
 info:
   application:
     name: stream-processor
-    milestone: MVP-4
+    milestone: MVP-8
 
 coobi:
   processing:

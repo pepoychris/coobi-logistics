@@ -95,7 +95,7 @@ class ApiEnvironmentContractTest {
         assertThat(bind(binder, "coobi.statistics.stream-processor.metrics-url", String.class))
                 .isEqualTo("http://processor:8081/actuator/metrics");
         assertThat(bind(binder, "coobi.statistics.stream-processor.processed-events-metric", String.class))
-                .isEqualTo("kafka.streams.process.total");
+                .isEqualTo("logistics_events_processed_total");
         assertThat(bind(binder, "coobi.statistics.stream-processor.timeout", String.class)).isEqualTo("2s");
 
         // The placeholders are asserted on the file itself: the binder resolves them, so the

@@ -30,7 +30,7 @@ import org.springframework.web.client.RestClient;
  */
 class StreamProcessorMetricsClientTest {
 
-    private static final String METRIC = "kafka.streams.process.total";
+    private static final String METRIC = "logistics_events_processed_total";
     private static final Instant STARTED_AT = Instant.parse("2026-09-21T09:00:00Z");
 
     private final AdvanceableClock clock = new AdvanceableClock(STARTED_AT);

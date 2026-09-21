@@ -26,8 +26,8 @@ import org.springframework.web.client.RestClientResponseException;
  *
  * <p>The number is not derived from the database, because the database deliberately keeps one
  * state row per vehicle and no event history (MVP-4): the only place the count of processed
- * events exists is the Kafka Streams metric of the processor. Two consequences follow, and
- * both are visible in the response rather than hidden:
+ * events exists is the counter the processor increments while it consumes the location topic
+ * (MVP-8.1). Two consequences follow, and both are visible in the response rather than hidden:
  *
  * <ul>
  *   <li>when the processor is unreachable, or does not publish the metric, the endpoint

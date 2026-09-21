@@ -231,7 +231,7 @@ Every value has a named source, and no value is estimated:
 
 | Field | Source | When it is `null` |
 | --- | --- | --- |
-| `processedEvents` | The Kafka Streams counter of the stream processor, read over its Actuator metrics endpoint and summed over its stream threads | The processor is unreachable, or does not publish the metric |
+| `processedEvents` | The counter the stream processor increments while it consumes the location topic (MVP-8), read over its Actuator metrics endpoint and summed over the measurements it publishes | The processor is unreachable, or does not publish the metric |
 | `eventsPerSecond` | The average rate between the two latest readings of that counter, in this instance | No second reading yet (the first response after a start), or the counter restarted with the processor |
 | `activeVehicles` | `SELECT COUNT(*)` of the vehicles whose latest state is `MOVING` | Never |
 | `alertsGenerated` | `SELECT COUNT(*)` of the rows currently stored in `alerts` | Never |

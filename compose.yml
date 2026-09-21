@@ -1,6 +1,7 @@
 # Coobi Logistics - local development infrastructure (MVP-0.2).
 #
-# Single-node Apache Kafka broker running in KRaft mode plus PostgreSQL.
+# Single-node Apache Kafka broker running in KRaft mode plus PostgreSQL, and the Prometheus
+# that scrapes the two stream services of the pipeline.
 # Every published port is bound to the loopback interface, so the stack is
 # reachable from this machine only (Global Rule 8).
 #
@@ -84,6 +85,45 @@ services:
       retries: 12
       start_period: 10s
 
+  prometheus:
+    # The BusyBox flavor of the image, so the health check below can use its `wget`.
+    image: prom/prometheus:v3.14.0-busybox
+    environment:
+      # The scrape targets of infrastructure/prometheus/prometheus.yml. The application
+      # services run from the host in this stack - no service ships a Dockerfile yet - so the
+      # default points at the host, and the published ports of the two services are what gets
+      # scraped. Override it to scrape the services from another address.
+      PROMETHEUS_HOST: ${PROMETHEUS_HOST:-host.docker.internal}
+    ports:
+      # The Prometheus UI, its API and its own health endpoint, on the loopback interface
+      # only like the rest of the stack (Global Rule 8).
+      - "127.0.0.1:9090:9090"
+    extra_hosts:
+      # `host.docker.internal` is provided by Docker Desktop; on a Linux engine this maps it
+      # to the host gateway, so the same definition works on both.
+      - "host.docker.internal:host-gateway"
+    volumes:
+      # Read-only: the scrape configuration is versioned in this repository, not edited in the
+      # container.
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      # Fifteen days of local samples: enough to compare runs of a benchmark, small enough that
+      # the volume stays a development artifact.
+      - "--storage.tsdb.retention.time=15d"
+    healthcheck:
+      # Real readiness check: `/-/healthy` answers only once the server is serving. A scrape
+      # configuration that cannot be loaded stops the server from starting at all, so a
+      # container that never becomes healthy is the visible signal of a broken file.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9090/-/healthy || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+
 volumes:
   kafka-data:
   postgres-data:
+  prometheus-data:
