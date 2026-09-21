@@ -1,24 +1,26 @@
 <script setup lang="ts">
+import { Truck } from '@lucide/vue'
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { apiTargetLabel } from './api/baseUrl'
 import ConnectionBadge from './components/ConnectionBadge.vue'
 import EventFeed from './components/EventFeed.vue'
+import FleetMap from './components/FleetMap.vue'
 import KpiGrid from './components/KpiGrid.vue'
-import VehicleMap from './components/VehicleMap.vue'
 import { useEventStream } from './composables/useEventStream'
 import type { StreamStatus } from './composables/useSseChannel'
 import { useStatistics } from './composables/useStatistics'
-import { formatAge } from './util/format'
+import { formatAge, formatClockAt } from './util/format'
 
 /**
- * The dashboard: one statistics stream, one events stream, and the three views
- * that read them.
+ * The operations console of the fleet: one statistics stream, one events
+ * stream, and the three views that read them.
  *
- * Both streams are opened here and only here, so a page holds two connections to
- * the API no matter how many components consume them, and what the page shows is
- * a function of what the backend sent rather than of what a view would like to
- * display.
+ * Both streams are opened here and only here, so a page holds two connections
+ * to the API no matter how many components consume them, and what the page
+ * shows is a function of what the backend sent rather than of what a view would
+ * like to display. The map, the numbers and the feed are three readings of the
+ * same two streams.
  */
 const statistics = useStatistics()
 const events = useEventStream()
@@ -72,10 +74,16 @@ onBeforeUnmount(() => {
   <div class="app">
     <header class="app__header">
       <div class="app__identity">
-        <h1 class="app__title">Coobi Logistics</h1>
-        <p class="app__subtitle">Real-time fleet telemetry, end to end</p>
+        <span class="app__mark" aria-hidden="true"><Truck class="app__mark-icon" /></span>
+        <div>
+          <h1 class="app__title">Coobi Logistics</h1>
+          <p class="app__subtitle">Fleet telemetry, from the broker to the browser</p>
+        </div>
       </div>
-      <ConnectionBadge :status="overallStatus" :last-message-at="lastMessageAt" @reconnect="reconnect" />
+      <div class="app__state">
+        <span class="app__clock">{{ formatClockAt(now) }}</span>
+        <ConnectionBadge :status="overallStatus" :last-message-at="lastMessageAt" @reconnect="reconnect" />
+      </div>
     </header>
 
     <main class="app__main">
@@ -92,7 +100,7 @@ onBeforeUnmount(() => {
       />
 
       <div class="app__workspace">
-        <VehicleMap :vehicles="events.vehicles.value" />
+        <FleetMap :vehicles="events.vehicles.value" :status="events.status.value" />
         <EventFeed :entries="events.entries.value" :status="events.status.value" @clear="events.clear" />
       </div>
     </main>
@@ -100,7 +108,10 @@ onBeforeUnmount(() => {
     <footer class="app__footer">
       <span>Last backend update: {{ formatAge(statistics.updatedAt.value ?? events.lastMessageAt.value, now) }}</span>
       <span>API: {{ apiTarget }}</span>
-      <span>Every number, vehicle and alert on this page comes from the API and its streams. Nothing is generated locally.</span>
+      <span>
+        Every number, vehicle and alert on this page comes from the API and its two streams; the map is drawn from
+        those positions, with no map provider involved.
+      </span>
     </footer>
   </div>
 </template>

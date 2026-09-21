@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { Pause, Play, Trash } from '@lucide/vue'
 import { nextTick, ref, watch } from 'vue'
 
 import type { StreamStatus } from '../composables/useSseChannel'
@@ -59,17 +60,8 @@ watch(
           :title="following ? 'Stop following the live edge' : 'Follow the live edge again'"
           @click="following = !following"
         >
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              v-if="following"
-              d="M9 6v12M15 6v12"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.8"
-              stroke-linecap="round"
-            />
-            <path v-else d="M8 5.5v13l10-6.5z" fill="currentColor" stroke="none" />
-          </svg>
+          <Pause v-if="following" class="icon" aria-hidden="true" />
+          <Play v-else class="icon" aria-hidden="true" />
           {{ following ? 'Following' : 'Paused' }}
         </button>
         <button
@@ -78,16 +70,7 @@ watch(
           title="Remove every event from this view"
           @click="emit('clear')"
         >
-          <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-            <path
-              d="M6 7h12M9 7V5h6v2M8 7l1 12h6l1-12"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-          </svg>
+          <Trash class="icon" aria-hidden="true" />
           Clear
         </button>
       </div>

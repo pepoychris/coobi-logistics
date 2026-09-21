@@ -1,5 +1,7 @@
 <script setup lang="ts">
+import { Activity, Gauge, Radio, TriangleAlert, Truck } from '@lucide/vue'
 import { computed } from 'vue'
+import type { Component } from 'vue'
 
 import type { Statistics } from '../api/types'
 import type { StreamStatus } from '../composables/useSseChannel'
@@ -24,6 +26,7 @@ const props = defineProps<{
 interface Card {
   key: string
   label: string
+  icon: Component
   value: string
   unit: string | null
   source: string
@@ -36,6 +39,7 @@ const cards = computed<Card[]>(() => {
     {
       key: 'processedEvents',
       label: 'Events processed',
+      icon: Activity,
       value: formatCount(statistics?.processedEvents ?? null),
       unit: null,
       source: 'Kafka Streams counter of the stream processor',
@@ -44,6 +48,7 @@ const cards = computed<Card[]>(() => {
     {
       key: 'eventsPerSecond',
       label: 'Events per second',
+      icon: Gauge,
       value: formatCount(statistics?.eventsPerSecond ?? null),
       unit: '/s',
       source: 'Rate between the two latest readings of that counter',
@@ -52,6 +57,7 @@ const cards = computed<Card[]>(() => {
     {
       key: 'activeVehicles',
       label: 'Active vehicles',
+      icon: Truck,
       value: formatCount(statistics?.activeVehicles ?? null),
       unit: null,
       source: 'Vehicles whose latest state is MOVING, counted in the database',
@@ -60,6 +66,7 @@ const cards = computed<Card[]>(() => {
     {
       key: 'alertsGenerated',
       label: 'Alerts generated',
+      icon: TriangleAlert,
       value: formatCount(statistics?.alertsGenerated ?? null),
       unit: null,
       source: 'Rows currently stored in the alerts table',
@@ -77,7 +84,10 @@ const uptime = computed(() => formatUptime(props.statistics?.uptimeSeconds ?? nu
     <h2 id="kpis-heading" class="visually-hidden">Live statistics of the stack</h2>
     <dl class="kpis__list" :aria-busy="props.loading">
       <div v-for="card in cards" :key="card.key" class="kpi" :data-unavailable="card.unavailable || undefined">
-        <dt class="kpi__label">{{ card.label }}</dt>
+        <dt class="kpi__label">
+          <component :is="card.icon" class="kpi__icon" aria-hidden="true" />
+          {{ card.label }}
+        </dt>
         <dd class="kpi__value">
           <template v-if="props.loading">
             <span class="skeleton" aria-hidden="true" />
@@ -92,7 +102,10 @@ const uptime = computed(() => formatUptime(props.statistics?.uptimeSeconds ?? nu
       </div>
 
       <div class="kpi kpi--status" :class="`kpi--${props.status}`">
-        <dt class="kpi__label">System status</dt>
+        <dt class="kpi__label">
+          <Radio class="kpi__icon" aria-hidden="true" />
+          System status
+        </dt>
         <dd class="kpi__value">
           <span class="kpi__state">{{ systemStatus }}</span>
         </dd>

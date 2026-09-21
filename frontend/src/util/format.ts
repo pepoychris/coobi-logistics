@@ -29,6 +29,15 @@ function isUsableNumber(value: number | null | undefined): value is number {
 }
 
 /**
+ * @param at epoch milliseconds of an instant
+ * @returns the local wall-clock time of that instant, to the second
+ */
+export function formatClockAt(at: number): string {
+  const instant = new Date(at)
+  return Number.isNaN(instant.getTime()) ? '--:--:--' : CLOCK.format(instant)
+}
+
+/**
  * @param instant ISO-8601 instant of the contract
  * @returns the local wall-clock time of that instant, to the second
  */
@@ -37,7 +46,7 @@ export function formatClock(instant: string | null | undefined): string {
     return '--:--:--'
   }
   const at = new Date(instant)
-  return Number.isNaN(at.getTime()) ? '--:--:--' : CLOCK.format(at)
+  return Number.isNaN(at.getTime()) ? '--:--:--' : formatClockAt(at.getTime())
 }
 
 /**

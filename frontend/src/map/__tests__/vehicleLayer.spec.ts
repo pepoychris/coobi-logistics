@@ -1,31 +1,25 @@
 import { describe, expect, it } from 'vitest'
 
 import { vehicle } from '../../__tests__/support/fixtures'
-import type { Vehicle, VehicleStatus } from '../../api/types'
-import { VehicleLayer } from '../vehicleLayer'
-import type { VehicleMarker, VehicleMarkerFactory } from '../vehicleLayer'
+import type { Vehicle } from '../../api/types'
+import { splitFleet } from '../budget'
+import { VehicleLayer, type VehicleNode, type VehicleNodeFactory, type VehicleNodeState } from '../vehicleLayer'
 
 /**
- * A marker that records what was done to it, which is how the incremental rule
- * of the layer is asserted: what was created, what was updated, what was
- * removed, and how many times.
+ * A stand-in for a mini vehicle that records what the layer asked of it, so the
+ * bookkeeping of the map is tested without a GPU.
  */
-class RecordingMarker implements VehicleMarker {
-  readonly positions: [number, number][] = []
-  readonly statuses: VehicleStatus[] = []
-  readonly details: Vehicle[] = []
+class RecordingNode implements VehicleNode {
+  readonly id: string
+  updates: { vehicle: Vehicle; state: VehicleNodeState }[] = []
   removed = false
 
-  setPosition(latitude: number, longitude: number): void {
-    this.positions.push([latitude, longitude])
+  constructor(id: string) {
+    this.id = id
   }
 
-  setStatus(status: VehicleStatus): void {
-    this.statuses.push(status)
-  }
-
-  setDetails(vehicle: Vehicle): void {
-    this.details.push(vehicle)
+  update(vehicle: Vehicle, state: VehicleNodeState): void {
+    this.updates.push({ vehicle, state })
   }
 
   remove(): void {
@@ -33,85 +27,140 @@ class RecordingMarker implements VehicleMarker {
   }
 }
 
-function recordingLayer(): { layer: VehicleLayer; created: RecordingMarker[]; byId: Map<string, RecordingMarker> } {
-  const created: RecordingMarker[] = []
-  const byId = new Map<string, RecordingMarker>()
-  const factory: VehicleMarkerFactory = {
-    create: () => {
-      const marker = new RecordingMarker()
-      created.push(marker)
-      return marker
-    },
+class RecordingFactory implements VehicleNodeFactory {
+  readonly created: RecordingNode[] = []
+  readonly createdWith = new Map<string, VehicleNodeState>()
+
+  create(vehicle: Vehicle, state: VehicleNodeState): VehicleNode {
+    const node = new RecordingNode(vehicle.vehicleId)
+    this.created.push(node)
+    this.createdWith.set(vehicle.vehicleId, state)
+    return node
   }
-  return { layer: new VehicleLayer(factory), created, byId }
+
+  get nodesByVehicle(): Map<string, RecordingNode> {
+    return new Map(this.created.map((node) => [node.id, node]))
+  }
 }
 
-describe('VehicleLayer', () => {
-  it('creates one marker per vehicle the first time the fleet is drawn', () => {
-    const { layer, created } = recordingLayer()
+const STATE: VehicleNodeState = { selected: false, scale: 1, trails: true, x: 0, y: 0 }
 
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1' }), vehicle({ vehicleId: 'TRUCK-2' })])
+function stateOf(overrides: Partial<VehicleNodeState> = {}): (entry: Vehicle) => VehicleNodeState {
+  return () => ({ ...STATE, ...overrides })
+}
 
-    expect(created).toHaveLength(2)
-    expect(layer.size).toBe(2)
-    expect(layer.ids()).toEqual(['TRUCK-1', 'TRUCK-2'])
+function fleet(count: number, status: Vehicle['status'] = 'MOVING'): Vehicle[] {
+  return Array.from({ length: count }, (_, index) =>
+    vehicle({ vehicleId: `TRUCK-${String(index).padStart(3, '0')}`, status }),
+  )
+}
+
+describe('the layer of mini vehicles', () => {
+  it('creates one node per drawn vehicle and touches nothing on a quiet tick', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const drawn = fleet(3)
+
+    const first = layer.sync(splitFleet(drawn, 10), stateOf())
+    const second = layer.sync(splitFleet(drawn, 10), stateOf())
+
+    expect(first).toEqual({ rendered: 3, created: 3, updated: 0, removed: 0 })
+    expect(second).toEqual({ rendered: 3, created: 0, updated: 0, removed: 0 })
+    expect(factory.created).toHaveLength(3)
   })
 
-  it('moves the marker that exists instead of creating a second one', () => {
-    const { layer, created } = recordingLayer()
+  it('moves only the vehicle whose state changed', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const before = fleet(4)
+    layer.sync(splitFleet(before, 10), stateOf())
 
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1', latitude: 39.4, longitude: -0.3 })])
-    const first = created[0]
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1', latitude: 39.5, longitude: -0.4, status: 'STOPPED' })])
+    const after = before.map((entry, index) =>
+      index === 2 ? { ...entry, latitude: entry.latitude + 0.001, speed: entry.speed + 5 } : entry,
+    )
+    const stats = layer.sync(splitFleet(after, 10), stateOf())
 
-    expect(created).toHaveLength(1)
-    expect(first.positions).toEqual([[39.5, -0.4]])
-    expect(first.statuses).toEqual(['STOPPED'])
-    expect(first.details).toHaveLength(1)
-    expect(first.details[0].status).toBe('STOPPED')
+    expect(stats).toEqual({ rendered: 4, created: 0, updated: 1, removed: 0 })
+    expect(factory.nodesByVehicle.get('TRUCK-002')?.updates).toHaveLength(1)
+    expect(factory.nodesByVehicle.get('TRUCK-000')?.updates).toHaveLength(0)
   })
 
-  it('leaves a marker alone while the state it draws does not change', () => {
-    const { layer, created } = recordingLayer()
-    const fleet = [vehicle({ vehicleId: 'TRUCK-1' }), vehicle({ vehicleId: 'TRUCK-2' })]
+  it('removes the vehicle the backend stopped reporting', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const before = fleet(3)
+    layer.sync(splitFleet(before, 10), stateOf())
 
-    layer.sync(fleet)
-    layer.sync([...fleet])
+    const stats = layer.sync(splitFleet(before.slice(0, 2), 10), stateOf())
 
-    expect(created).toHaveLength(2)
-    expect(created.flatMap((marker) => marker.positions)).toEqual([])
-    expect(created.flatMap((marker) => marker.statuses)).toEqual([])
-    expect(created.flatMap((marker) => marker.details)).toEqual([])
+    expect(stats).toEqual({ rendered: 2, created: 0, updated: 0, removed: 1 })
+    expect(factory.nodesByVehicle.get('TRUCK-002')?.removed).toBe(true)
+    expect([...layer.ids()].sort()).toEqual(['TRUCK-000', 'TRUCK-001'])
   })
 
-  it('adds a marker only for a vehicle it has not seen', () => {
-    const { layer, created } = recordingLayer()
+  it('draws no more nodes than the budget, however large the fleet is', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
 
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1' })])
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1' }), vehicle({ vehicleId: 'TRUCK-2' })])
+    const stats = layer.sync(splitFleet(fleet(2_000), 100), stateOf())
 
-    expect(created).toHaveLength(2)
-    expect(layer.ids()).toEqual(['TRUCK-1', 'TRUCK-2'])
+    expect(stats.created).toBe(100)
+    expect(layer.size).toBe(100)
   })
 
-  it('removes the marker of a vehicle the backend stopped reporting', () => {
-    const { layer, created } = recordingLayer()
+  it('adds and removes the vehicles that cross the budget when a reader changes the count', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const drawn = fleet(150)
+    layer.sync(splitFleet(drawn, 25), stateOf())
+    const firstTwentyFive = layer.ids()
 
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1' }), vehicle({ vehicleId: 'TRUCK-2' })])
-    layer.sync([vehicle({ vehicleId: 'TRUCK-2' })])
+    const grown = layer.sync(splitFleet(drawn, 100), stateOf())
 
-    expect(created[0].removed).toBe(true)
-    expect(created[1].removed).toBe(false)
-    expect(layer.ids()).toEqual(['TRUCK-2'])
+    expect(grown.created).toBe(75)
+    expect(grown.updated).toBe(0)
+    expect(grown.removed).toBe(0)
+    expect(layer.ids().slice(0, 25)).toEqual(firstTwentyFive)
+
+    const shrunk = layer.sync(splitFleet(drawn, 25), stateOf())
+
+    expect(shrunk.removed).toBe(75)
+    expect(layer.size).toBe(25)
   })
 
-  it('removes every marker when it is cleared', () => {
-    const { layer, created } = recordingLayer()
+  it('redraws every node when the camera changes the size of the fleet on screen, and creates none', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const drawn = fleet(12)
+    layer.sync(splitFleet(drawn, 25), stateOf({ scale: 2 }))
 
-    layer.sync([vehicle({ vehicleId: 'TRUCK-1' }), vehicle({ vehicleId: 'TRUCK-2' })])
+    const zoomed = layer.sync(splitFleet(drawn, 25), stateOf({ scale: 0.5 }))
+
+    expect(zoomed).toEqual({ rendered: 12, created: 0, updated: 12, removed: 0 })
+  })
+
+  it('draws the vehicle a reader selected even when the budget left it out', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    const drawn = fleet(200, 'STOPPED')
+
+    layer.sync(splitFleet(drawn, 10, 'TRUCK-199'), (entry) => ({
+      ...STATE,
+      selected: entry.vehicleId === 'TRUCK-199',
+    }))
+
+    expect(layer.ids()).toContain('TRUCK-199')
+    expect(factory.createdWith.get('TRUCK-199')?.selected).toBe(true)
+  })
+
+  it('removes every node when the view goes away', () => {
+    const factory = new RecordingFactory()
+    const layer = new VehicleLayer(factory)
+    layer.sync(splitFleet(fleet(5), 10), stateOf())
+
     layer.clear()
 
-    expect(created.every((marker) => marker.removed)).toBe(true)
     expect(layer.size).toBe(0)
+    expect(factory.created.every((node) => node.removed)).toBe(true)
   })
 })

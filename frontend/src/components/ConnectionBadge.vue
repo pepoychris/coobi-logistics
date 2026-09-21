@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { RotateCw } from '@lucide/vue'
 import { computed } from 'vue'
 
 import type { StreamStatus } from '../composables/useSseChannel'
@@ -36,16 +37,7 @@ const canReconnect = computed(() => props.status !== 'live')
       title="Open the streams again"
       @click="emit('reconnect')"
     >
-      <svg class="icon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
-        <path
-          d="M20 12a8 8 0 1 1-2.34-5.66M20 4v4h-4"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="1.8"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-        />
-      </svg>
+      <RotateCw class="icon" aria-hidden="true" />
       Reconnect
     </button>
   </div>
