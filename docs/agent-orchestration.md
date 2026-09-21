@@ -22,7 +22,7 @@ This project uses a phase-based workflow to keep implementation fast and focused
   Cleanup/interrupt is allowed only after that terminal result has been received.
 - The repository owner has authorized the orchestrator to publish completed phase
   branches, create the pull request, wait for required checks/reviews, and merge the
-  approved pull request into \`develop\` after the merge gate passes. This authorization
+  approved pull request into `develop` after the merge gate passes. This authorization
   applies to each subsequent completed phase; it does not authorize unrelated changes,
   force-pushes, or merges that have not passed the gate.
 
