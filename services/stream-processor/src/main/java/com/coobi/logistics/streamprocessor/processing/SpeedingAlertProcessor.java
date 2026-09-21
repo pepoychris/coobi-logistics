@@ -4,6 +4,7 @@ import com.coobi.logistics.streamprocessor.event.AlertData;
 import com.coobi.logistics.streamprocessor.event.AlertEvent;
 import com.coobi.logistics.streamprocessor.event.AlertType;
 import com.coobi.logistics.streamprocessor.event.VehicleLocationEvent;
+import com.coobi.logistics.streamprocessor.persistence.TelemetryPersistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
@@ -31,6 +32,10 @@ import org.slf4j.LoggerFactory;
  * (Global Rule 15). A document that cannot be serialized is logged and dropped instead of
  * failing the stream: the alert contract is built locally, so a failure there is a defect
  * to investigate, not an input problem to route to the dead letter topic.
+ *
+ * <p>An accepted alert is also stored in PostgreSQL before it is published (MVP-4.3). The
+ * insert is keyed by the unique {@code event_id} of the alert, so a replayed record is a
+ * no-op instead of a duplicate row.
  */
 public final class SpeedingAlertProcessor implements Processor<String, VehicleLocationEvent, String, String> {
 
@@ -41,13 +46,16 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
 
     private final double speedLimitKph;
     private final ObjectMapper objectMapper;
+    private final TelemetryPersistence persistence;
 
     private ProcessorContext<String, String> context;
     private KeyValueStore<String, String> state;
 
-    public SpeedingAlertProcessor(double speedLimitKph, ObjectMapper objectMapper) {
+    public SpeedingAlertProcessor(
+            double speedLimitKph, ObjectMapper objectMapper, TelemetryPersistence persistence) {
         this.speedLimitKph = speedLimitKph;
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.persistence = Objects.requireNonNull(persistence, "persistence must not be null");
     }
 
     /**
@@ -61,8 +69,8 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
     }
 
     public static ProcessorSupplier<String, VehicleLocationEvent, String, String> supplier(
-            double speedLimitKph, ObjectMapper objectMapper) {
-        return () -> new SpeedingAlertProcessor(speedLimitKph, objectMapper);
+            double speedLimitKph, ObjectMapper objectMapper, TelemetryPersistence persistence) {
+        return () -> new SpeedingAlertProcessor(speedLimitKph, objectMapper, persistence);
     }
 
     @Override
@@ -114,6 +122,9 @@ public final class SpeedingAlertProcessor implements Processor<String, VehicleLo
             return;
         }
 
+        // Stored before it is published, so a retried record cannot publish an alert that
+        // has no row behind it.
+        persistence.recordAlert(alert);
         context.forward(new Record<>(event.vehicleId(), payload, record.timestamp(), record.headers()));
         log.info(
                 "speeding detected vehicle-id={} speed={} speed-limit={} alert-id={}",

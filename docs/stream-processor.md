@@ -53,6 +53,16 @@ contract and are kept in sync with `.env.example` and README.md.
 | `STOPPED_WINDOW_SECONDS` | Time a vehicle must stay effectively stationary before it is reported as stopped | `300` | seconds |
 | `MOVEMENT_THRESHOLD_METERS` | Total distance below which movement counts as "no movement" over the stopped window | `50` | metres |
 | `COOBI_KAFKA_INITIALIZATION_ENABLED` | Provision the Kafka topics on startup; `false` runs the service without a broker | `true` | boolean |
+| `POSTGRES_DB` | Database name, shared with the Compose stack | `logistics` | database name |
+| `POSTGRES_USER` | Database role of the service | `logistics` | role name |
+| `POSTGRES_PASSWORD` | Password of that role, the same value the Compose stack uses | (none) | string |
+| `SPRING_DATASOURCE_URL` | JDBC URL, for a database that is not the local stack | `jdbc:postgresql://localhost:5432/${POSTGRES_DB}` | JDBC URL |
+| `SPRING_DATASOURCE_USERNAME` | Overrides the database role | `POSTGRES_USER` | role name |
+| `SPRING_DATASOURCE_PASSWORD` | Overrides the database password | `POSTGRES_PASSWORD` | string |
+
+The `POSTGRES_*` variables are the ones `.env` already holds for the Compose service, so one
+file configures the stack and this service. The `SPRING_DATASOURCE_*` names are the standard
+Spring overrides and win over them.
 
 Every other setting lives in
 [`application.yml`](../services/stream-processor/src/main/resources/application.yml) and can
@@ -223,6 +233,64 @@ The stopped alert therefore looks like this:
 }
 ```
 
+## Persistence (MVP-4)
+
+PostgreSQL holds the state this service *derives*, never the telemetry it consumes. There is
+no table of past positions: telemetry history is a milestone non-goal, and the Kafka topic
+remains the only record of what was published.
+
+| Table | Rows | Written by |
+| --- | --- | --- |
+| `vehicles` | one per vehicle ever seen; `vehicle_id` unique, `created_at` kept | the state branch, when it sees a vehicle for the first time |
+| `vehicle_latest_state` | exactly one per vehicle, overwritten in place | the state branch, once per accepted record |
+| `alerts` | one per accepted alert; `event_id` unique | both detections, when they accept an alert |
+
+`vehicle_latest_state` carries position, speed, heading, status and `last_update` - the
+timestamp of the telemetry event, not of the write - plus `updated_at`, so a stale row is
+distinguishable from a vehicle that stopped reporting. It references `vehicles` with a
+cascading foreign key. `alerts` keeps `event_id`, `vehicle_id`, `type`, `severity`,
+`occurred_at`, `created_at` and the `data` document of the alert as `JSONB`; `vehicle_id` is
+deliberately not a foreign key, because the two detections consume the same telemetry record
+independently, so an alert can reach the table before the state branch has written the
+vehicle row.
+
+### Idempotency
+
+Kafka Streams delivers at least once, so every write has to be harmless when it happens
+twice:
+
+- the vehicle upsert inserts the vehicle row only when it is missing, then updates the single
+  state row and inserts it when the update matched nothing;
+- the alert insert is guarded by the unique `event_id`. A second delivery of the same alert
+  hits the constraint, which the repository treats as "already stored" rather than as an
+  error; a replayed Kafka record carries the `eventId` it had the first time, so it cannot
+  become a second row;
+- a write that loses a race with a concurrent writer of the same vehicle is retried once,
+  which then takes the update branch. Idempotency does not depend on writers being
+  serialized: the unique constraints are the backstop.
+
+### Integration point and trade-off
+
+The persistence calls live inside the two detection processors, so the derived state is
+written by the thread that derived it: the state branch writes the vehicle and its latest
+state, and both branches store the alerts they accept before publishing them.
+
+The write is synchronous JDBC on the stream thread. That keeps the sequence "derive, store,
+publish" reproducible and avoids a second delivery path, at the cost of tying the throughput
+of the stream to the database: a slow database slows the stream, and a failing write fails
+the record instead of being swallowed. Kafka Streams then retries that record against the
+same restored state, which is safe because every write is idempotent. Moving the writes
+behind a bounded queue is a later optimisation; nothing in the topology depends on the
+current placement.
+
+### Schema
+
+The schema belongs to Flyway. The migrations under
+[`db/migration`](../services/stream-processor/src/main/resources/db/migration) are its only
+definition, they run before the context is considered started, and the service declares no
+JPA entity, so no ORM can create or update a table. `spring.jpa.hibernate.ddl-auto` is set to
+`none` as a guard for the day an entity is added.
+
 ## Observability
 
 | Signal | Where |
@@ -233,6 +301,7 @@ The stopped alert therefore looks like this:
 | Stopped detections | `INFO` log line per alert, with the vehicle, the window and the movement threshold |
 | Rejections | `WARN` log line per record routed to the dead letter topic |
 | Recovery | `DEBUG` log line when a vehicle returns below the limit |
+| Persistence | `DEBUG` log line when a duplicate alert is ignored; `WARN` when a concurrent writer forces a retry of a vehicle upsert |
 
 ## Running without a broker
 
@@ -263,14 +332,18 @@ $env:MANAGEMENT_HEALTH_KAFKA_ENABLED="false"
 ./services/stream-processor/mvnw -f services/stream-processor/pom.xml test
 ```
 
-The suite runs without a broker. The topology is driven with `TopologyTestDriver`, which
+The suite runs without a broker and without a database server. The topology is driven with `TopologyTestDriver`, which
 covers the validation outcomes, the dead letter envelope, the speed-limit transitions, the
 contents of the state store and the stopped-vehicle transitions, including the continuity of
 valid records after an invalid one. The stopped-vehicle timelines are written with the
 timestamps of the telemetry itself, so a five-minute window is covered without a single
 wait. The remaining tests cover binding and fail-fast configuration, the documented
 environment variables, topic provisioning against a mocked admin client and the serialized
-shape, versioning and immutability of every contract.
+shape, versioning and immutability of every contract. The persistence tests apply the shipped
+migrations and run the production SQL against an in-memory database in PostgreSQL mode, which
+is what proves the upsert behaviour and the duplicate-`event_id` idempotency without a
+server; another group drives the wired topology with a recorder standing in for the database,
+to cover which records reach the port and that a rejected one never does.
 
 ## Troubleshooting
 
@@ -282,3 +355,6 @@ shape, versioning and immutability of every contract.
 | No stopped-vehicle alerts although the generator is running | A stopped alert needs `STOPPED_WINDOW_SECONDS` without movement. If the simulated fleet never stands still that long, lower the window, for example `$env:STOPPED_WINDOW_SECONDS="30"`. |
 | Records land in the dead letter topic | Their `error` field names the rejected field. The most common cause is a payload written by a different schema version. |
 | `mvnw.cmd` fails under PowerShell 7 | Use an installed Maven as an equivalent fallback: `mvn -f services/stream-processor/pom.xml test`. |
+| Startup fails with a Flyway or connection error | PostgreSQL is not reachable with the configured credentials. Start `docker compose up -d`, and check that `POSTGRES_PASSWORD` is set in the shell that runs the service. |
+| Startup fails with `Detected failed migration` | The schema was created by hand before the migrations ran. Inspect `flyway_schema_history` and the tables before repairing anything; the migrations are the only definition of the schema. |
+| Alerts appear in Kafka but not in `alerts` | The insert failed and the record is being retried, so the table catches up with the topic. Check the health endpoint and the database logs. |

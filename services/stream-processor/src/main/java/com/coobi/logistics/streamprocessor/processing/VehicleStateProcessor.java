@@ -4,6 +4,7 @@ import com.coobi.logistics.streamprocessor.event.AlertData;
 import com.coobi.logistics.streamprocessor.event.AlertEvent;
 import com.coobi.logistics.streamprocessor.event.AlertType;
 import com.coobi.logistics.streamprocessor.event.VehicleLocationEvent;
+import com.coobi.logistics.streamprocessor.persistence.TelemetryPersistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Objects;
@@ -33,6 +34,11 @@ import org.slf4j.LoggerFactory;
  * (Global Rule 15), and only when the store says the vehicle was moving before this event:
  * telemetry of an already stopped vehicle is written to the store but produces no alert.
  *
+ * <p>Every accepted record also overwrites the persisted latest state of the vehicle, and a
+ * stopped alert is persisted before it is published (MVP-4.2 and MVP-4.3). The write happens
+ * on the stream thread and is idempotent, so a record that Kafka Streams retries after a
+ * database failure leaves the same rows behind as the first attempt would have.
+ *
  * <p>A state document that cannot be read back is logged and treated as absent, so a
  * single damaged entry restarts the window of one vehicle instead of failing the stream
  * for every vehicle behind it.
@@ -46,13 +52,16 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
 
     private final StoppedVehicleDetector detector;
     private final ObjectMapper objectMapper;
+    private final TelemetryPersistence persistence;
 
     private ProcessorContext<String, String> context;
     private KeyValueStore<String, String> state;
 
-    public VehicleStateProcessor(StoppedVehicleDetector detector, ObjectMapper objectMapper) {
+    public VehicleStateProcessor(
+            StoppedVehicleDetector detector, ObjectMapper objectMapper, TelemetryPersistence persistence) {
         this.detector = Objects.requireNonNull(detector, "detector must not be null");
         this.objectMapper = Objects.requireNonNull(objectMapper, "objectMapper must not be null");
+        this.persistence = Objects.requireNonNull(persistence, "persistence must not be null");
     }
 
     /**
@@ -66,8 +75,8 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
     }
 
     public static ProcessorSupplier<String, VehicleLocationEvent, String, String> supplier(
-            StoppedVehicleDetector detector, ObjectMapper objectMapper) {
-        return () -> new VehicleStateProcessor(detector, objectMapper);
+            StoppedVehicleDetector detector, ObjectMapper objectMapper, TelemetryPersistence persistence) {
+        return () -> new VehicleStateProcessor(detector, objectMapper, persistence);
     }
 
     @Override
@@ -83,6 +92,7 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
         VehicleState previous = read(vehicleId);
         VehicleState current = detector.advance(previous, event);
         state.put(vehicleId, write(vehicleId, current));
+        persistence.recordVehicleState(vehicleId, current);
 
         if (previous != null
                 && previous.status() == VehicleStatus.MOVING
@@ -136,6 +146,9 @@ public final class VehicleStateProcessor implements Processor<String, VehicleLoc
             return;
         }
 
+        // Stored before it is published: the write is idempotent, so a retry of this record
+        // cannot leave an alert in the topic without its row.
+        persistence.recordAlert(alert);
         context.forward(new Record<>(event.vehicleId(), payload, record.timestamp(), record.headers()));
         log.info(
                 "stopped vehicle detected vehicle-id={} window={} movement-threshold={} alert-id={}",

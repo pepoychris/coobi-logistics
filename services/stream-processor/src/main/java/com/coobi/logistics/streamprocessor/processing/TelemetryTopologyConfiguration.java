@@ -4,6 +4,7 @@ import com.coobi.logistics.streamprocessor.config.KafkaTopicsProperties;
 import com.coobi.logistics.streamprocessor.config.ProcessingProperties;
 import com.coobi.logistics.streamprocessor.event.DeadLetterEvent;
 import com.coobi.logistics.streamprocessor.event.VehicleLocationEvent;
+import com.coobi.logistics.streamprocessor.persistence.TelemetryPersistence;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.validation.Validator;
@@ -42,6 +43,13 @@ import org.springframework.context.annotation.Configuration;
  * {@code vehicleId}, each with its own state store, and both publish to the same alert
  * topic through one merged sink, so the alert contract and the topic wiring stay unchanged
  * while the two state machines can never interfere with each other.
+ *
+ * <p>Both detections also write the derived state to PostgreSQL through
+ * {@link TelemetryPersistence} (MVP-4): the state branch overwrites the latest state of the
+ * vehicle and both branches store the alerts they accept. The write is synchronous and
+ * idempotent, which is the trade-off documented in {@code docs/stream-processor.md}: it
+ * keeps the sequence "derive, store, publish" in one thread - and therefore reproducible -
+ * at the cost of tying the throughput of the stream to the database.
  */
 @Configuration(proxyBeanMethods = false)
 public class TelemetryTopologyConfiguration {
@@ -58,7 +66,8 @@ public class TelemetryTopologyConfiguration {
             Validator validator,
             ProcessingProperties processingProperties,
             KafkaTopicsProperties topics,
-            Clock processingClock) {
+            Clock processingClock,
+            TelemetryPersistence persistence) {
 
         TelemetryInspector inspector = new TelemetryInspector(objectMapper, validator);
         StoppedVehicleDetector stoppedVehicleDetector = new StoppedVehicleDetector(
@@ -81,12 +90,12 @@ public class TelemetryTopologyConfiguration {
                 accepted.mapValues((key, inspection) -> inspection.event(), Named.as("accepted-events"));
 
         KStream<String, String> speedingAlerts = acceptedEvents.process(
-                SpeedingAlertProcessor.supplier(processingProperties.getSpeedLimitKph(), objectMapper),
+                SpeedingAlertProcessor.supplier(processingProperties.getSpeedLimitKph(), objectMapper, persistence),
                 Named.as(SpeedingAlertProcessor.PROCESSOR_NAME),
                 SpeedingAlertProcessor.STATE_STORE_NAME);
 
         KStream<String, String> stoppedAlerts = acceptedEvents.process(
-                VehicleStateProcessor.supplier(stoppedVehicleDetector, objectMapper),
+                VehicleStateProcessor.supplier(stoppedVehicleDetector, objectMapper, persistence),
                 Named.as(VehicleStateProcessor.PROCESSOR_NAME),
                 VehicleStateProcessor.STATE_STORE_NAME);
 

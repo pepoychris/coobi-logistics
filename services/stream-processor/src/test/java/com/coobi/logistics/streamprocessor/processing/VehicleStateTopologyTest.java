@@ -6,6 +6,7 @@ import static org.assertj.core.api.Assertions.within;
 import com.coobi.logistics.streamprocessor.config.KafkaTopicsProperties;
 import com.coobi.logistics.streamprocessor.config.ProcessingProperties;
 import com.coobi.logistics.streamprocessor.support.TelemetryFixtures;
+import com.coobi.logistics.streamprocessor.support.RecordingPersistence;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Clock;
@@ -300,7 +301,13 @@ class VehicleStateTopologyTest {
         StreamsBuilder builder = new StreamsBuilder();
         new TelemetryTopologyConfiguration()
                 .telemetryProcessingTopology(
-                        builder, objectMapper, TelemetryFixtures.validator(), processing, topics, clock);
+                        builder,
+                        objectMapper,
+                        TelemetryFixtures.validator(),
+                        processing,
+                        topics,
+                        clock,
+                        new RecordingPersistence());
 
         TopologyTestDriver driver = new TopologyTestDriver(builder.build(), streamsConfiguration());
         drivers.add(driver);
