@@ -84,6 +84,11 @@ coobi:
     load-test:
       vehicle-count: ${LOAD_TEST_VEHICLE_COUNT:5000}
       target-events-per-second: ${LOAD_TEST_TARGET_EVENTS_PER_SECOND:20000}
+      # Optional bound of a load test (MVP-11.1): publishing stops when it elapses and the
+      # service stays up, so a benchmark ends the load without ending the pipeline. `0` (the
+      # default) means the run is bounded by whoever stops the service, which is what a
+      # demonstration run does. A negative value stops the service at startup.
+      duration: ${LOAD_TEST_DURATION:0}
     simulation:
       # Deterministic trajectories: the same seed always replays the same fleet.
       random-seed: ${GENERATOR_RANDOM_SEED:20260101}

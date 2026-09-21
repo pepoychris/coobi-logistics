@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.coobi.logistics.eventgenerator.config.GeneratorMode;
 import com.coobi.logistics.eventgenerator.config.GeneratorProperties;
 import com.coobi.logistics.eventgenerator.simulation.VehicleTelemetrySimulator;
+import java.time.Duration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -23,6 +24,7 @@ import org.springframework.boot.test.context.SpringBootTest;
     "GENERATOR_MODE=LOAD_TEST",
     "LOAD_TEST_VEHICLE_COUNT=3000",
     "LOAD_TEST_TARGET_EVENTS_PER_SECOND=4000",
+    "LOAD_TEST_DURATION=5m",
     "GENERATOR_PUBLISH_ENABLED=false",
     "coobi.kafka.initialization.enabled=false"
 })
@@ -41,6 +43,7 @@ class GeneratorConfigurationOverrideTests {
         assertThat(generatorProperties.getTargetEventsPerSecond()).isEqualTo(5000);
         assertThat(generatorProperties.effectiveVehicleCount()).isEqualTo(3000);
         assertThat(generatorProperties.effectiveTargetEventsPerSecond()).isEqualTo(4000);
+        assertThat(generatorProperties.effectivePublishingDuration()).isEqualTo(Duration.ofMinutes(5));
         assertThat(simulator.vehicleCount()).isEqualTo(3000);
     }
 }

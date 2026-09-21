@@ -92,6 +92,15 @@ condition on one of those health checks rather than on a startup order, and Prom
 the two services under their names on the Compose network.
 See [docs/deployment.md](docs/deployment.md).
 
+The performance benchmark is implemented (MVP-11): `infrastructure/benchmarks/benchmark.py`
+runs a scenario - a fleet, a target rate and a duration - against that stack, samples the
+counters, the timers, the consumer lag and the resources of every container while it runs, and
+writes the raw samples, a summary and a report per scenario. The four scenarios of the
+roadmap are one command (`--matrix`), the dashboard is left out of the measurement, and a
+quantity whose source the stack does not expose is reported as `unavailable` rather than
+estimated. The measured results, the hardware they were measured on and the bottlenecks they
+expose are in [docs/benchmarks.md](docs/benchmarks.md).
+
 ## Configuration
 
 Configuration is environment-variable based. `.env.example` is the source of truth for
@@ -129,6 +138,7 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `COOBI_KAFKA_INITIALIZATION_ENABLED` | Whether the event generator provisions its Kafka topics on startup; `false` is the switch for starting without a broker | `true` | boolean |
 | `LOAD_TEST_VEHICLE_COUNT` | Simulated vehicles used by the event generator in `LOAD_TEST` mode | `5000` | vehicles (count) |
 | `LOAD_TEST_TARGET_EVENTS_PER_SECOND` | Target publication rate used by the event generator in `LOAD_TEST` mode | `20000` | events per second |
+| `LOAD_TEST_DURATION` | How long the event generator publishes in `LOAD_TEST` mode before it stops on its own; `0` publishes until the service is stopped | `0` | duration (`5m`, `90s`) or seconds |
 | `GENERATOR_RANDOM_SEED` | Seed of the deterministic trajectory generator | `20260101` | long |
 | `SPEED_LIMIT` | Speed above which a vehicle is reported as speeding | `120` | kilometres per hour (km/h) |
 | `STOPPED_WINDOW_SECONDS` | Time a vehicle must stay effectively stationary before it is reported as stopped | `300` | seconds |
@@ -293,8 +303,10 @@ and they are the only tests that need Docker.
 | Unit tests, every service | `mvn test` |
 | Integration tests | `mvn -Dintegration-tests test` |
 | Deployment contract | `pwsh -File infrastructure/scripts/verify-deployment.ps1` - add `-Stack` to build the images, start the whole stack and probe it over HTTP |
+| Benchmark harness | `python -m unittest discover -s infrastructure/benchmarks/tests` - the scenarios, the rates, the percentiles and the report of MVP-11 |
 | Contract, layers and commands | [docs/testing-reliability.md](docs/testing-reliability.md) |
 | Stack, images and health dependencies | [docs/deployment.md](docs/deployment.md) |
+| Performance and its bottlenecks | [docs/benchmarks.md](docs/benchmarks.md) |
 
 The integration tests start `apache/kafka:4.3.1` and `postgres:18.6`, the two images
 `compose.yml` runs, and the smoke test starts the stream processor next to the API so that a
@@ -304,6 +316,44 @@ the processor and the generator from their build output instead of from their ex
 and it stops at the `test` phase because `package` is what produces those jars.
 A machine without a Docker daemon skips the container tests with the reason Testcontainers
 reports, and the default `mvn test` neither compiles them nor resolves their dependencies.
+
+## Performance Benchmark
+
+`infrastructure/benchmarks/benchmark.py` measures the Dockerized stack of this repository and
+writes what it measured under `infrastructure/benchmarks/results/`. It needs Python 3.11 or
+newer and the Docker CLI with the Compose plugin, and it starts the stack itself: one command
+runs one scenario, and `--matrix` runs the four scenarios of the roadmap.
+
+```bash
+# one scenario: vehicles / target events per second / window
+python infrastructure/benchmarks/benchmark.py --scenario 5000/10000/5m
+
+# the four scenarios of MVP-11.2, five minutes each
+python infrastructure/benchmarks/benchmark.py --matrix
+```
+
+| Item | Value |
+| --- | --- |
+| One scenario | `--scenario <vehicles>/<events per second>/<duration>`, for example `10000/25000/5m` |
+| The required matrix | `--matrix`: 1,000/1,000, 5,000/10,000, 10,000/25,000 and 20,000/50,000, five minutes each |
+| Plan without measuring | `--dry-run`, or `--list` for the scenarios alone |
+| Sampling interval | `--sample-interval 10s` by default, from the Prometheus counters and from `docker stats` |
+| Dashboard | Left out of the measurement; `--frontend` includes it |
+| Local volumes | Kept; `--reset-volumes` deletes them so a scenario starts from an empty Kafka |
+| Harness tests | `python -m unittest discover -s infrastructure/benchmarks/tests` |
+| Results | `infrastructure/benchmarks/results/<run>/`: `raw.jsonl`, `summary.json`, `report.md` per scenario, plus `matrix.md` |
+| Report | [docs/benchmarks.md](docs/benchmarks.md) |
+
+The harness applies the overlay `infrastructure/benchmarks/compose.benchmark.yml` on top of
+`compose.yml`. The overlay is the only thing a benchmark changes about the stack: it drives the
+generator in `LOAD_TEST` mode at the fleet and the rate of the scenario, bounds the run with
+`LOAD_TEST_DURATION` so a harness that dies leaves no load behind, asks the stream processor for
+its `benchmark` Spring profile (the latency histogram the report needs, and nothing else), and
+puts the dashboard behind a profile so it is not started at all.
+
+Every number of a report comes from a sample the harness captured: a quantity whose source the
+stack does not expose is written as `unavailable`, a scenario that did not produce a value is
+written as `not run`, and neither is ever a zero.
 
 ## Event Generator
 
@@ -516,7 +566,7 @@ coobi-logistics/
 │   ├── stream-processor/   # Kafka Streams processing service + Dockerfile
 │   └── logistics-api/      # REST API and real-time event streaming + Dockerfile
 ├── frontend/               # Vue 3 + TypeScript dashboard, its Dockerfile and nginx template
-├── infrastructure/         # Prometheus scrape configuration and the deployment check
+├── infrastructure/         # Prometheus configuration, the deployment check and the benchmark harness
 ├── docs/                   # Architecture, event contracts and benchmarks
 ├── .editorconfig
 ├── .env.example

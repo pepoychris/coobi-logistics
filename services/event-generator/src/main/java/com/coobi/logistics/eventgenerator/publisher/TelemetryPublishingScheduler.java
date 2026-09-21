@@ -10,8 +10,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.LongSupplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.SmartLifecycle;
 import org.springframework.scheduling.TaskScheduler;
 import org.springframework.stereotype.Component;
@@ -25,6 +27,11 @@ import org.springframework.stereotype.Component;
  *
  * <p>Implements {@link SmartLifecycle} so the publishing task is cancelled during a
  * graceful shutdown, after which the publisher drains the producer.
+ *
+ * <p>A load test can bound its own run (MVP-11.1): once
+ * {@code coobi.generator.load-test.duration} has elapsed, the task cancels itself and the
+ * service stays up with its health and metrics endpoints answering, so a bounded benchmark
+ * stops the load without taking the pipeline down with it.
  */
 @Component
 public class TelemetryPublishingScheduler implements SmartLifecycle {
@@ -49,25 +56,48 @@ public class TelemetryPublishingScheduler implements SmartLifecycle {
     private final VehicleTelemetrySimulator simulator;
     private final TelemetryPublisher publisher;
     private final TaskScheduler taskScheduler;
+    private final LongSupplier nanoTime;
     private final PublishRatePlanner ratePlanner = new PublishRatePlanner();
     private final AtomicBoolean tickInProgress = new AtomicBoolean();
 
     private volatile ScheduledFuture<?> publishingTask;
     private volatile boolean running;
+    /**
+     * Start of the current publishing window, or {@link Long#MIN_VALUE} until the first tick
+     * of a run starts it, so the window is measured from the first event rather than from the
+     * moment the context was created.
+     */
+    private volatile long windowStartNanos = Long.MIN_VALUE;
     private long lastThroughputReportNanos;
     private long lastReportedPublishedCount;
 
+    @Autowired
     public TelemetryPublishingScheduler(
             GeneratorProperties generatorProperties,
             KafkaTopicsProperties kafkaTopicsProperties,
             VehicleTelemetrySimulator simulator,
             TelemetryPublisher publisher,
             TaskScheduler taskScheduler) {
+        this(generatorProperties, kafkaTopicsProperties, simulator, publisher, taskScheduler, System::nanoTime);
+    }
+
+    /**
+     * @param nanoTime monotonic clock of the publishing window, so a test can advance it
+     *     instead of waiting for a real duration to elapse
+     */
+    TelemetryPublishingScheduler(
+            GeneratorProperties generatorProperties,
+            KafkaTopicsProperties kafkaTopicsProperties,
+            VehicleTelemetrySimulator simulator,
+            TelemetryPublisher publisher,
+            TaskScheduler taskScheduler,
+            LongSupplier nanoTime) {
         this.generatorProperties = generatorProperties;
         this.kafkaTopicsProperties = kafkaTopicsProperties;
         this.simulator = simulator;
         this.publisher = publisher;
         this.taskScheduler = taskScheduler;
+        this.nanoTime = nanoTime;
     }
 
     @Override
@@ -85,15 +115,17 @@ public class TelemetryPublishingScheduler implements SmartLifecycle {
             log.warn("telemetry publishing disabled, the generator will not publish events");
             return;
         }
+        windowStartNanos = Long.MIN_VALUE;
         Duration tickInterval = Duration.ofMillis(generatorProperties.getTickIntervalMillis());
         publishingTask = taskScheduler.scheduleAtFixedRate(this::publishNextBatch, tickInterval);
         lastThroughputReportNanos = System.nanoTime();
         lastReportedPublishedCount = publisher.publishedCount();
         log.info(
-                "telemetry publishing started mode={} vehicles={} target-events-per-second={} tick-interval-millis={} topic={}",
+                "telemetry publishing started mode={} vehicles={} target-events-per-second={} duration={} tick-interval-millis={} topic={}",
                 generatorProperties.getMode(),
                 simulator.vehicleCount(),
                 generatorProperties.effectiveTargetEventsPerSecond(),
+                generatorProperties.effectivePublishingDuration(),
                 generatorProperties.getTickIntervalMillis(),
                 kafkaTopicsProperties.locationTopic());
     }
@@ -128,6 +160,18 @@ public class TelemetryPublishingScheduler implements SmartLifecycle {
         if (!generatorProperties.isPublishEnabled()) {
             return;
         }
+        if (publishingWindowElapsed()) {
+            // The bounded run has delivered its configured duration. Publishing stops the way a
+            // shutdown stops it, so the producer is still drained, and the service keeps
+            // answering its health and metrics endpoints.
+            log.info(
+                    "telemetry publishing window elapsed duration={} published-total={} failed-total={}",
+                    generatorProperties.effectivePublishingDuration(),
+                    publisher.publishedCount(),
+                    publisher.failedCount());
+            stop();
+            return;
+        }
         if (!tickInProgress.compareAndSet(false, true)) {
             log.warn("telemetry tick skipped, the previous tick is still running");
             return;
@@ -158,6 +202,24 @@ public class TelemetryPublishingScheduler implements SmartLifecycle {
         } finally {
             tickInProgress.set(false);
         }
+    }
+
+    /**
+     * Whether the publishing window of the active mode has elapsed. An unbounded mode never
+     * elapses, and the first tick of a run only starts the window.
+     */
+    private boolean publishingWindowElapsed() {
+        Duration window = generatorProperties.effectivePublishingDuration();
+        if (window.isZero()) {
+            return false;
+        }
+        long now = nanoTime.getAsLong();
+        long start = windowStartNanos;
+        if (start == Long.MIN_VALUE) {
+            windowStartNanos = now;
+            return false;
+        }
+        return now - start >= window.toNanos();
     }
 
     private void reportThroughputIfDue() {

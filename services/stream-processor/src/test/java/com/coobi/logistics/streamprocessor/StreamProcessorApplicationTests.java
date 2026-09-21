@@ -83,7 +83,11 @@ class StreamProcessorApplicationTests {
                 // The duration is rendered with its base unit in the name, as Prometheus
                 // expects of a duration; `/actuator/metrics` keeps the contract name.
                 .contains("# TYPE logistics_event_processing_duration_seconds summary")
-                .contains("application=\"stream-processor\"");
+                .contains("application=\"stream-processor\"")
+                // MVP-11.1: the percentile gauges and the bucket histogram of the timer belong
+                // to the benchmark profile, so a normal run publishes neither of them.
+                .doesNotContain("quantile=")
+                .doesNotContain("logistics_event_processing_duration_seconds_bucket");
     }
 
     /**

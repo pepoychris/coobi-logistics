@@ -1,0 +1,31 @@
+# Coobi Logistics - stream-processor, benchmark profile (MVP-11.1).
+#
+# The whole file exists for one reason: the benchmark report (MVP-11.3) has to report the
+# distribution of the processing latency, and the default profile publishes only what a
+# counter and a timer publish by themselves - a count, a total and a maximum, which give the
+# average of one processing step but no percentile of it.
+#
+# Nothing here changes what the topology does, and nothing here is active in a normal run:
+# the profile has to be requested, and the benchmark overlay of this repository
+# (`infrastructure/benchmarks/compose.benchmark.yml`) is the only thing that requests it, by
+# setting `SPRING_PROFILES_ACTIVE=benchmark` on this service. A performance run is the price
+# of the extra histograms, so a demonstration stack does not pay it.
+
+management:
+  metrics:
+    distribution:
+      # The cumulative buckets Prometheus turns into a percentile of the measured window with
+      # `histogram_quantile()`, which is the source `docs/benchmarks.md` reports: the window
+      # they cover is the window of the query rather than a rolling window inside the process.
+      # Enabling a quantile histogram is also what makes the Prometheus registry export this
+      # timer as a `histogram` type - its quantile *gauges* are not part of that export, which
+      # is why the report reads the buckets.
+      percentiles-histogram:
+        logistics_event_processing_duration: true
+      # The boundaries this profile adds to the default grid of Micrometer, stated instead of
+      # inferred: a processing step of this topology is validation plus the two detections,
+      # which is microseconds on an idle machine and milliseconds under load, and the default
+      # grid starts at one millisecond. Without these, p50 would land in the first bucket and
+      # mean nothing.
+      slo:
+        logistics_event_processing_duration: 50us,100us,250us,500us,1ms,2ms,5ms,10ms,25ms,50ms,100ms,250ms,500ms,1s

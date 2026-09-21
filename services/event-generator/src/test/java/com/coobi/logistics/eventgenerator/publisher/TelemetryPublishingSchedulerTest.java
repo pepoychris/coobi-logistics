@@ -20,6 +20,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ScheduledFuture;
+import java.util.function.LongSupplier;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.scheduling.TaskScheduler;
@@ -31,6 +32,7 @@ class TelemetryPublishingSchedulerTest {
     private RecordingPublisher publisher;
     private VehicleTelemetrySimulator simulator;
     private TaskScheduler taskScheduler;
+    private MutableNanoTime nanoTime;
 
     @BeforeEach
     void setUp() {
@@ -40,6 +42,7 @@ class TelemetryPublishingSchedulerTest {
                 SimulationFixtures.normalModeFleet(),
                 new MutableClock(Instant.parse("2026-09-21T09:00:00Z")));
         taskScheduler = mock(TaskScheduler.class);
+        nanoTime = new MutableNanoTime();
     }
 
     @Test
@@ -117,9 +120,77 @@ class TelemetryPublishingSchedulerTest {
         assertThat(publisher.failures).isPositive();
     }
 
+    /** MVP-11.1: a load test stops publishing once the configured duration has elapsed. */
+    @Test
+    void stopsPublishingWhenTheLoadTestDurationElapses() {
+        properties.setMode(GeneratorMode.LOAD_TEST);
+        properties.getLoadTest().setDuration(Duration.ofMinutes(5));
+        ScheduledFuture<?> scheduledTask = mock(ScheduledFuture.class);
+        doReturn(scheduledTask)
+                .when(taskScheduler)
+                .scheduleAtFixedRate(any(Runnable.class), eq(Duration.ofMillis(100)));
+        TelemetryPublishingScheduler scheduler = newScheduler();
+        scheduler.start();
+
+        scheduler.publishNextBatch();
+        int publishedWithinTheWindow = publisher.published.size();
+        assertThat(publishedWithinTheWindow).isPositive();
+
+        nanoTime.advance(Duration.ofMinutes(5).minusMillis(1));
+        scheduler.publishNextBatch();
+        assertThat(publisher.published).hasSize(publishedWithinTheWindow * 2);
+
+        nanoTime.advance(Duration.ofMillis(1));
+        scheduler.publishNextBatch();
+
+        assertThat(publisher.published).hasSize(publishedWithinTheWindow * 2);
+        assertThat(scheduler.isRunning()).isFalse();
+        verify(scheduledTask).cancel(false);
+    }
+
+    /** The bound belongs to the load-test profile: a demonstration run is never cut short. */
+    @Test
+    void ignoresTheLoadTestDurationInNormalMode() {
+        properties.getLoadTest().setDuration(Duration.ofSeconds(1));
+        TelemetryPublishingScheduler scheduler = newScheduler();
+
+        scheduler.publishNextBatch();
+        nanoTime.advance(Duration.ofHours(1));
+        scheduler.publishNextBatch();
+
+        assertThat(publisher.published).hasSize(200);
+    }
+
+    @Test
+    void publishesWithoutBoundWhenNoDurationIsConfigured() {
+        properties.setMode(GeneratorMode.LOAD_TEST);
+        TelemetryPublishingScheduler scheduler = newScheduler();
+
+        scheduler.publishNextBatch();
+        nanoTime.advance(Duration.ofHours(1));
+        scheduler.publishNextBatch();
+
+        assertThat(publisher.published).isNotEmpty();
+    }
+
     private TelemetryPublishingScheduler newScheduler() {
         return new TelemetryPublishingScheduler(
-                properties, new KafkaTopicsProperties(), simulator, publisher, taskScheduler);
+                properties, new KafkaTopicsProperties(), simulator, publisher, taskScheduler, nanoTime);
+    }
+
+    /** Monotonic clock a test advances by hand, so no test waits for a real duration. */
+    private static final class MutableNanoTime implements LongSupplier {
+
+        private long nanos = 1_000_000_000L;
+
+        @Override
+        public long getAsLong() {
+            return nanos;
+        }
+
+        void advance(Duration duration) {
+            nanos += duration.toNanos();
+        }
     }
 
     /** Records what a tick would have published. */
