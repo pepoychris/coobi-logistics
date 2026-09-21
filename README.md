@@ -16,7 +16,7 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-3 - Stateful stream processing in place.**
+**MVP-4 - Derived state persisted in PostgreSQL.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -30,10 +30,12 @@ service that simulates a fleet of vehicles and publishes versioned location tele
 Kafka, with a configurable target rate, reproducible topics and a health endpoint. See
 [docs/event-generator.md](docs/event-generator.md).
 
-The stream processor is implemented (MVP-2 and MVP-3): `services/stream-processor` is a
+The stream processor is implemented (MVP-2 to MVP-4): `services/stream-processor` is a
 Spring Boot Kafka Streams service that consumes that telemetry, validates it, routes invalid
 records to the dead letter topic, maintains the latest state of every vehicle in a Kafka
-Streams state store and turns speed-limit crossings and prolonged stops into alert events.
+Streams state store, turns speed-limit crossings and prolonged stops into alert events and
+persists that derived state in PostgreSQL - one row per vehicle plus one row per accepted
+alert, created by Flyway migrations and written idempotently.
 See [docs/stream-processor.md](docs/stream-processor.md).
 
 The REST API and the frontend arrive in the following milestones, which are tracked in the
@@ -258,6 +260,8 @@ docker compose up -d
 | Produces | `logistics.vehicle.location.dlq.v1` (invalid records), `logistics.alert.v1` (alerts) |
 | Detection | `SPEED_LIMIT`, default 120 km/h; one alert per `NORMAL` to `SPEEDING` transition. `STOPPED_WINDOW_SECONDS`, default 300 s, and `MOVEMENT_THRESHOLD_METERS`, default 50 m; one alert per `MOVING` to `STOPPED` transition |
 | State | Latest state of every vehicle - position, speed, heading, last update and status - in a Kafka Streams state store keyed by `vehicleId` |
+| Persistence | `vehicles`, `vehicle_latest_state` and `alerts` in PostgreSQL, created by Flyway migrations and written idempotently; telemetry history is deliberately not stored |
+| Database | `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` of the local stack, or the standard `SPRING_DATASOURCE_*` overrides |
 | Alert contract | `AlertEvent`, version 1, `eventType` of `SPEEDING_DETECTED` or `VEHICLE_STOPPED_DETECTED`, keyed by `vehicleId` |
 | Health | `GET http://localhost:8081/actuator/health` |
 | Tests | `.\services\stream-processor\mvnw.cmd -f services/stream-processor/pom.xml test` |
@@ -268,6 +272,9 @@ the two detections or is published to the dead letter topic carrying `originalEv
 Kafka Streams state store, so staying above the limit or standing still produces no further
 alert, and a restart continues from the restored state instead of repeating an alert that was
 already reported.
+Every accepted record also overwrites the persisted latest state of the vehicle and stores
+the alerts it produces, keyed by their unique `eventId`, so replaying a record cannot
+duplicate a row. Telemetry itself is never persisted.
 
 Read [docs/stream-processor.md](docs/stream-processor.md) for the complete configuration
 contract, the validation rules, the alert contract and the troubleshooting table.

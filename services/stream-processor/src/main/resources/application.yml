@@ -1,4 +1,4 @@
-# Coobi Logistics - stream-processor (MVP-2 and MVP-3).
+# Coobi Logistics - stream-processor (MVP-2 to MVP-4).
 #
 # Configuration is environment-variable based. The variables written as
 # `${VARIABLE:default}` are the documented contract shared with `.env.example`
@@ -14,6 +14,30 @@ spring:
     name: stream-processor
   lifecycle:
     timeout-per-shutdown-phase: 20s
+  # Persistence (MVP-4.1). The database is part of the local stack (compose.yml), so the
+  # defaults below match it; every value can be overridden from the environment, both with
+  # the standard `SPRING_DATASOURCE_*` names and with the `POSTGRES_*` names the Compose
+  # service uses, so one `.env` configures the stack and this service.
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/${POSTGRES_DB:logistics}}
+    username: ${SPRING_DATASOURCE_USERNAME:${POSTGRES_USER:logistics}}
+    password: ${SPRING_DATASOURCE_PASSWORD:${POSTGRES_PASSWORD:}}
+    hikari:
+      pool-name: stream-processor
+      # Two stream threads plus headroom; the processor is not a fan-out web service.
+      maximum-pool-size: 4
+  # The schema is created by the migrations under db/migration and by nothing else
+  # (MVP-4.1). Flyway runs before the application context is considered started, so a
+  # database that cannot be migrated aborts startup instead of degrading silently.
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+  # This service persists through JdbcTemplate and declares no JPA entity, so no ORM
+  # schema management is involved. The setting is stated explicitly as a guard: if an
+  # entity is ever added, the schema still belongs to the migrations.
+  jpa:
+    hibernate:
+      ddl-auto: none
   kafka:
     # Host processes use `localhost:9092`; a container needs `kafka:29092`.
     bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
@@ -59,7 +83,7 @@ management:
 info:
   application:
     name: stream-processor
-    milestone: MVP-3
+    milestone: MVP-4
 
 coobi:
   processing:
