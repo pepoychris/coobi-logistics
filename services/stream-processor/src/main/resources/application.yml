@@ -1,0 +1,84 @@
+# Coobi Logistics - stream-processor (MVP-2).
+#
+# Configuration is environment-variable based. The variables written as
+# `${VARIABLE:default}` are the documented contract shared with `.env.example`
+# and README.md; every other entry is a default that only this service needs and
+# that can still be overridden with relaxed binding (`COOBI_PROCESSING_...`,
+# `SPRING_KAFKA_STREAMS_...`).
+#
+# A missing or invalid value aborts startup instead of degrading silently
+# (Global Rule 11).
+
+spring:
+  application:
+    name: stream-processor
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  kafka:
+    # Host processes use `localhost:9092`; a container needs `kafka:29092`.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    streams:
+      application-id: coobi-stream-processor
+      client-id: stream-processor
+      # `false` builds the topology but never starts it: the relaxed-binding form,
+      # `SPRING_KAFKA_STREAMS_AUTO_STARTUP=false`, is the switch for working
+      # without a broker.
+      auto-startup: true
+      properties:
+        num.stream.threads: 2
+        commit.interval.ms: 1000
+        # Every record that crosses this topology is a JSON document, so the
+        # default serdes are Strings as well.
+        default.key.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+        default.value.serde: org.apache.kafka.common.serialization.Serdes$StringSerde
+    admin:
+      # Bounds how long topic provisioning and the Kafka health check wait
+      # before reporting an unreachable broker.
+      operation-timeout: 15s
+      properties:
+        # Raw Kafka client property: milliseconds, not a duration string.
+        request.timeout.ms: 10000
+
+server:
+  # The generator keeps 8080, so both services run side by side locally.
+  port: 8081
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: stream-processor
+    milestone: MVP-2
+
+coobi:
+  processing:
+    # Speed above which a vehicle is reported as speeding (MVP-2.3).
+    speed-limit-kph: ${SPEED_LIMIT:120}
+  kafka:
+    topics:
+      location: logistics.vehicle.location.v1
+      dead-letter: logistics.vehicle.location.dlq.v1
+      alert: logistics.alert.v1
+      partitions: 6
+      replication-factor: 1
+    initialization:
+      enabled: true
+      max-attempts: 5
+      retry-backoff-millis: 3000
+      request-timeout-millis: 15000
+
+logging:
+  level:
+    com.coobi.logistics.streamprocessor: INFO
+    org.apache.kafka: WARN
