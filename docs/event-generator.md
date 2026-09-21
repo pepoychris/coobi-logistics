@@ -201,6 +201,8 @@ application cancels the scheduling task and flushes the producer before exiting
 | --- | --- |
 | Liveness and state | `GET http://localhost:8080/actuator/health` |
 | Counters | `/actuator/metrics/coobi.generator.events`, tagged `result=published` or `result=failed` |
+| Prometheus | `GET http://localhost:8080/actuator/prometheus`, scraped by the Prometheus of the local stack (MVP-8) |
+| Kafka producer | The `kafka.producer.*` metrics of the client - records per second, errors, requests in flight - are bound by Micrometer and published on the same endpoint |
 | Rate logs | `telemetry throughput events-per-second=... published-total=... failed-total=...`, every 30 s by default |
 | Topic provisioning | `kafka topics created` / `already present` / `expanded` / `verified` |
 | Shutdown summary | `telemetry publisher stopped published-total=... failed-total=...` |
@@ -209,6 +211,12 @@ Health includes the Kafka connection through the Spring Boot health indicator, w
 it can report `DOWN` (HTTP 503) while the broker is unreachable; the admin client timeouts
 keep that check bounded to about 15 s. Set `management.health.kafka.enabled=false` to report
 the service state alone.
+
+The producer metrics are bound because `KafkaClientConfiguration` applies the producer
+customizers of the context to the factory this service declares, which is what Spring Boot
+would otherwise have done for a factory of its own. The catalog of the metrics of the whole
+pipeline, with the queries to run against a benchmark, is in
+[observability.md](observability.md).
 
 Verify events end to end:
 

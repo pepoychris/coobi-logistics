@@ -43,18 +43,35 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics
+        # `metrics` is the JSON view; `prometheus` is the exposition format Prometheus scrapes
+        # (MVP-8.1 and MVP-8.2).
+        include: health,info,metrics,prometheus
   endpoint:
     health:
       show-details: never
   info:
     env:
       enabled: true
+  metrics:
+    # The producer binder of Spring Boot is applied to the producer factory declared in
+    # KafkaClientConfiguration, so the Kafka client metrics of MVP-8.3 are published next to
+    # the coobi.generator.* counters: record-send-rate (records/s), record-error-rate and
+    # record-error-total (producer errors), plus request and buffer metrics.
+    tags:
+      # Distinguishes the two services of the pipeline in one Prometheus database.
+      application: ${spring.application.name}
+  prometheus:
+    metrics:
+      export:
+        # The export of a registry is opt-in, so the endpoint that renders
+        # /actuator/prometheus is requested explicitly here instead of relying on the
+        # auto-configuration being picked up by accident.
+        enabled: true
 
 info:
   application:
     name: event-generator
-    milestone: MVP-1
+    milestone: MVP-8
 
 coobi:
   generator:

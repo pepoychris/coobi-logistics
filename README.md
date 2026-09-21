@@ -16,8 +16,8 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-5 - Logistics REST API, MVP-6 - real-time browser streaming, and MVP-7 - Vue
-real-time dashboard.**
+**MVP-5 - Logistics REST API, MVP-6 - real-time browser streaming, MVP-7 - Vue real-time
+dashboard, and MVP-8 - observability.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -61,6 +61,15 @@ Every value it shows comes from the backend, a statistic the API reports as abse
 gap, and a stream that is not live says so instead of showing stale numbers as if they were
 current.
 See [docs/frontend.md](docs/frontend.md).
+
+Observability is implemented (MVP-8): the two services that touch Kafka publish Micrometer
+metrics in the Prometheus exposition format on `/actuator/prometheus` - the counter of every
+event consumed, processed, rejected and turned into an alert, a timer of the processing steps
+themselves, and the Kafka client and Kafka Streams metrics of their clients, including the
+consumer lag and the processing rate - and `compose.yml` runs the Prometheus that scrapes
+both of them. A counter that stays flat means no record reached that stage, rather than a
+number that only looks live.
+See [docs/observability.md](docs/observability.md).
 
 ## Configuration
 
@@ -109,6 +118,7 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` | Most vehicle states one tick of the event stream may carry | `30` | vehicle states (count) |
 | `COOBI_STREAM_STATISTICS_INTERVAL` | How often the statistics stream reads and sends the live statistics | `1s` | duration (`250ms`, `2s`) |
 | `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS` | Browsers one stream serves at a time; the next connection is answered `503` | `32` | connections (count) |
+| `PROMETHEUS_HOST` | Host the Prometheus container scrapes the two stream services on | `host.docker.internal` | host name or IP address |
 
 Each service reads these variables from its own environment, and a value already
 present in that environment wins over any fallback baked into the service. `compose.yml`
@@ -121,6 +131,10 @@ variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED
 `STOPPED_WINDOW_SECONDS` and `MOVEMENT_THRESHOLD_METERS` by the stream processor
 (MVP-2 and MVP-3), and `STREAM_PROCESSOR_METRICS_URL` and the `COOBI_STREAM_*` variables by
 the logistics-api (MVP-5 and MVP-6).
+
+`PROMETHEUS_HOST` is read by the Prometheus container of the stack (MVP-8), which uses it to
+reach the two services that publish metrics. [docs/observability.md](docs/observability.md)
+documents the metrics themselves.
 
 The dashboard of MVP-7 is not a service with an environment of its own: Vite reads
 `VITE_API_BASE_URL` and `VITE_API_PROXY_TARGET` from `frontend/.env` at build time, and both
@@ -138,12 +152,13 @@ command instead of starting the stack with no password.
 `compose.yml` at the repository root defines the local development stack:
 
 ```text
-kafka     apache/kafka:4.3.1   single-node KRaft broker, no ZooKeeper
-postgres  postgres:18.6        PostgreSQL
+kafka       apache/kafka:4.3.1                single-node KRaft broker, no ZooKeeper
+postgres    postgres:18.6                     PostgreSQL
+prometheus  prom/prometheus:v3.14.0-busybox   scrapes the two stream services (MVP-8)
 ```
 
-Both services publish their ports on the loopback interface only (`127.0.0.1:9092` and
-`127.0.0.1:5432`), so the stack is never reachable from another machine.
+All three services publish their ports on the loopback interface only (`127.0.0.1:9092`,
+`127.0.0.1:5432` and `127.0.0.1:9090`), so the stack is never reachable from another machine.
 
 Start the stack:
 
@@ -205,6 +220,19 @@ The database is reachable from the host at `localhost:5432` using the `POSTGRES_
 `POSTGRES_USER` and `POSTGRES_PASSWORD` values from `.env`. A containerized service
 reaches it at `postgres:5432`.
 
+### Prometheus
+
+Prometheus is reachable from the host at `http://localhost:9090` (MVP-8). It scrapes the
+Actuator endpoints of the event generator and the stream processor every 15 seconds, using
+the configuration in `infrastructure/prometheus/prometheus.yml`, and stores what it reads in
+its own volume for 15 days. The two services run from the host in this stack, so the scrape
+targets are reached through `host.docker.internal`; `PROMETHEUS_HOST` overrides the address.
+
+A target is `down` until the service it describes is running, which is why the Prometheus of
+a stack that has only started its infrastructure reports both of them as down. The metric
+catalog, the queries worth running against a benchmark and the troubleshooting table live in
+[docs/observability.md](docs/observability.md).
+
 ## Event Generator
 
 `services/event-generator` simulates the fleet and produces the telemetry that the rest of
@@ -258,6 +286,7 @@ proxy, an installed Maven is an equivalent fallback:
 | Topics | `logistics.vehicle.location.v1`, `logistics.vehicle.location.dlq.v1` (6 partitions, replication factor 1) |
 | Health | `GET http://localhost:8080/actuator/health` |
 | Metrics | `GET http://localhost:8080/actuator/metrics/coobi.generator.events` |
+| Prometheus | `GET http://localhost:8080/actuator/prometheus`, scraped by the Prometheus of the stack (MVP-8) |
 | Tests | `.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml test` |
 
 Topics are provisioned on startup and the operation is idempotent, so a repeated start
@@ -297,6 +326,7 @@ docker compose up -d
 | Database | `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` of the local stack, or the standard `SPRING_DATASOURCE_*` overrides |
 | Alert contract | `AlertEvent`, version 1, `eventType` of `SPEEDING_DETECTED` or `VEHICLE_STOPPED_DETECTED`, keyed by `vehicleId` |
 | Health | `GET http://localhost:8081/actuator/health` |
+| Metrics | `GET http://localhost:8081/actuator/prometheus`: the events received, processed and rejected, the alerts per detection, the processing time and the Kafka client metrics (MVP-8) |
 | Tests | `.\services\stream-processor\mvnw.cmd -f services/stream-processor/pom.xml test` |
 
 Invalid telemetry never stops the stream: the payload is inspected once and either reaches
@@ -341,7 +371,7 @@ docker compose up -d
 | Vehicles | One page of the fleet, newest telemetry first, optionally filtered by `status`; an unknown vehicle is a `404` |
 | Alerts | One page of alerts, newest first, filtered independently by `vehicleId`, `type` and `severity`; an unknown alert is a `404` |
 | Paging | `page` from `0`, `size` between `1` and `100`; the order of a page is fixed by the endpoint so paging is stable |
-| Statistics | `processedEvents` and `eventsPerSecond` from the Kafka Streams counters of the processor, `activeVehicles` and `alertsGenerated` counted in the database, `uptimeSeconds` of this instance - a source that cannot be read is reported as `null` |
+| Statistics | `processedEvents` and `eventsPerSecond` from the counter the stream processor publishes over Actuator (MVP-8), `activeVehicles` and `alertsGenerated` counted in the database, `uptimeSeconds` of this instance - a source that cannot be read is reported as `null` |
 | Bounded streams | A tick carries at most `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL` alerts and `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` vehicle states, a burst is sampled rather than queued, a browser that stops reading loses its oldest frames, and a stream with no browser connected has no ticker at all |
 | Stream configuration | `COOBI_STREAM_EVENTS_POLL_INTERVAL`, `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL`, `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL`, `COOBI_STREAM_STATISTICS_INTERVAL` (`1s` by default) and `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS`; a stream at capacity answers `503` |
 | Persistence | Reads `vehicles`, `vehicle_latest_state` and `alerts`; creates nothing and writes nothing |
@@ -422,7 +452,9 @@ each with its own Maven wrapper and its service documentation
 [docs/stream-processor.md](docs/stream-processor.md),
 [docs/logistics-api.md](docs/logistics-api.md)). `frontend` holds the MVP-7 dashboard, built by
 npm rather than Maven and documented in [docs/frontend.md](docs/frontend.md).
-`infrastructure` is still an empty placeholder.
+`infrastructure` holds the assets of the local stack that are not Compose definitions, today
+the scrape configuration of Prometheus (MVP-8), documented in
+[docs/observability.md](docs/observability.md).
 
 ## Technology Stack
 

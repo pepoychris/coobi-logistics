@@ -297,11 +297,36 @@ JPA entity, so no ORM can create or update a table. `spring.jpa.hibernate.ddl-au
 | --- | --- |
 | Health | `GET http://localhost:8081/actuator/health` |
 | Info | `GET http://localhost:8081/actuator/info` |
+| Metrics (JSON) | `GET http://localhost:8081/actuator/metrics` |
+| Metrics (Prometheus) | `GET http://localhost:8081/actuator/prometheus` |
 | Speeding detections | `INFO` log line per alert, with the vehicle, the speed and the threshold |
 | Stopped detections | `INFO` log line per alert, with the vehicle, the window and the movement threshold |
 | Rejections | `WARN` log line per record routed to the dead letter topic |
 | Recovery | `DEBUG` log line when a vehicle returns below the limit |
 | Persistence | `DEBUG` log line when a duplicate alert is ignored; `WARN` when a concurrent writer forces a retry of a vehicle upsert |
+
+### Metrics (MVP-8)
+
+The service publishes five meters that describe what the topology consumes and produces, and
+the Kafka metrics of the streams themselves:
+
+| Metric | Type | Meaning |
+| --- | --- | --- |
+| `logistics_events_received_total` | Counter | Records consumed from `logistics.vehicle.location.v1` |
+| `logistics_events_processed_total` | Counter | Records accepted by the validation stage |
+| `logistics_events_failed_total` | Counter | Records routed to the dead letter topic |
+| `logistics_alerts_generated_total` | Counter, tagged `type` | Alerts generated, per detection |
+| `logistics_event_processing_duration` | Timer | Time of one processing step: validation, each detection an accepted record feeds, and the dead letter mapping of a rejected one |
+
+They are incremented on the paths they describe - `processed` and `failed` partition
+`received`, and an alert is counted where it is forwarded - so an empty topic is visible as a
+flat counter instead of a metric that is registered but never used. The Kafka Streams, Kafka
+consumer and Kafka producer metrics of the service come from the Micrometer binder Spring
+Boot attaches to the streams, which is where consumer lag and the processing rate are read.
+
+Prometheus scrapes this endpoint from the local stack (`docker compose up -d`), and the
+complete catalog - the exposition names, the invariants and the queries worth running against
+a benchmark - is in [observability.md](observability.md).
 
 ## Running without a broker
 

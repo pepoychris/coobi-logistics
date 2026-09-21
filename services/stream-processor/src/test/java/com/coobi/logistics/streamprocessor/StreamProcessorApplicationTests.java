@@ -11,6 +11,7 @@ import java.util.Locale;
 import org.apache.kafka.streams.kstream.KStream;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.kafka.StreamsBuilderFactoryBeanCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.context.ApplicationContext;
@@ -63,6 +64,57 @@ class StreamProcessorApplicationTests {
 
         assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(health.getBody()).contains("\"status\":\"UP\"");
+    }
+
+    /**
+     * MVP-8.1 and MVP-8.2: the custom metrics and the JVM metrics of this service are
+     * published in the format Prometheus scrapes.
+     */
+    @Test
+    void exposesThePrometheusEndpoint() {
+        ResponseEntity<String> prometheus = restTemplate.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(prometheus.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(prometheus.getBody())
+                .contains("# TYPE logistics_events_received_total counter")
+                .contains("# TYPE logistics_events_processed_total counter")
+                .contains("# TYPE logistics_events_failed_total counter")
+                .contains("# TYPE logistics_alerts_generated_total counter")
+                // The duration is rendered with its base unit in the name, as Prometheus
+                // expects of a duration; `/actuator/metrics` keeps the contract name.
+                .contains("# TYPE logistics_event_processing_duration_seconds summary")
+                .contains("application=\"stream-processor\"");
+    }
+
+    /**
+     * MVP-8.1: the contract names are the names of the meters, which is what the JSON view of
+     * Actuator reports and what a Prometheus query is written against.
+     */
+    @Test
+    void exposesTheContractMetricsByTheirExactNames() {
+        ResponseEntity<String> received =
+                restTemplate.getForEntity("/actuator/metrics/logistics_events_received_total", String.class);
+        ResponseEntity<String> duration =
+                restTemplate.getForEntity("/actuator/metrics/logistics_event_processing_duration", String.class);
+
+        assertThat(received.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(received.getBody()).contains("\"name\":\"logistics_events_received_total\"");
+        assertThat(duration.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(duration.getBody())
+                .contains("\"name\":\"logistics_event_processing_duration\"")
+                .contains("\"statistic\":\"COUNT\"");
+    }
+
+    /**
+     * MVP-8.3: Spring Boot attaches its Micrometer binder to the streams of this application,
+     * which is where the Kafka Streams metrics of the service come from. The binder is a
+     * customizer of the streams factory bean, so asserting the customizer is in the context is
+     * asserting that the metrics are wired without starting a broker.
+     */
+    @Test
+    void registersTheKafkaStreamsMetricsBinder() {
+        assertThat(applicationContext.getBean("kafkaStreamsMetrics", StreamsBuilderFactoryBeanCustomizer.class))
+                .isNotNull();
     }
 
     @Test

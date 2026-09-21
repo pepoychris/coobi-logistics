@@ -8,9 +8,14 @@ import com.coobi.logistics.eventgenerator.config.KafkaTopicsProperties;
 import com.coobi.logistics.eventgenerator.publisher.TelemetryPublisher;
 import com.coobi.logistics.eventgenerator.simulation.VehicleTelemetrySimulator;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.autoconfigure.kafka.DefaultKafkaProducerFactoryCustomizer;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.client.TestRestTemplate;
+import org.springframework.kafka.core.DefaultKafkaProducerFactory;
+import org.springframework.kafka.core.MicrometerProducerListener;
+import org.springframework.kafka.core.ProducerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 
@@ -45,12 +50,48 @@ class EventGeneratorApplicationTests {
     @Autowired
     private TelemetryPublisher publisher;
 
+    @Autowired
+    private ProducerFactory<String, String> telemetryProducerFactory;
+
+    @Autowired
+    private ObjectProvider<DefaultKafkaProducerFactoryCustomizer> producerFactoryCustomizers;
+
     @Test
     void exposesAHealthEndpoint() {
         ResponseEntity<String> health = restTemplate.getForEntity("/actuator/health", String.class);
 
         assertThat(health.getStatusCode()).isEqualTo(HttpStatus.OK);
         assertThat(health.getBody()).contains("\"status\":\"UP\"");
+    }
+
+    /**
+     * MVP-8.1 and MVP-8.2: the counters of the publisher and the JVM metrics of this service
+     * are published in the format Prometheus scrapes.
+     */
+    @Test
+    void exposesThePrometheusEndpoint() {
+        ResponseEntity<String> prometheus = restTemplate.getForEntity("/actuator/prometheus", String.class);
+
+        assertThat(prometheus.getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(prometheus.getBody())
+                .contains("# TYPE coobi_generator_events_total counter")
+                .contains("result=\"published\"")
+                .contains("result=\"failed\"")
+                .contains("application=\"event-generator\"");
+    }
+
+    /**
+     * MVP-8.3: the Kafka client metrics of this service come from the Micrometer listener the
+     * auto-configuration attaches to the producer factory, so the explicitly declared factory
+     * has to take the customizers of the context. Asserting the listener is attached is
+     * asserting the wiring, because a producer cannot be created without a broker.
+     */
+    @Test
+    void attachesTheProducerMetricsBinderToTheTelemetryProducer() {
+        assertThat(producerFactoryCustomizers.orderedStream()).isNotEmpty();
+        assertThat(telemetryProducerFactory).isInstanceOf(DefaultKafkaProducerFactory.class);
+        assertThat(((DefaultKafkaProducerFactory<?, ?>) telemetryProducerFactory).getListeners())
+                .anySatisfy(listener -> assertThat(listener).isInstanceOf(MicrometerProducerListener.class));
     }
 
     @Test
