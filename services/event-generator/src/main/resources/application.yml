@@ -1,0 +1,100 @@
+# Coobi Logistics - event-generator (MVP-1).
+#
+# Configuration is environment-variable based. The variables written as
+# `${VARIABLE:default}` are the documented contract shared with `.env.example`
+# and README.md; every other entry is a default that only this service needs and
+# that can still be overridden with relaxed binding (`COOBI_GENERATOR_...`).
+#
+# A missing or invalid value aborts startup instead of degrading silently
+# (Global Rule 11).
+
+spring:
+  application:
+    name: event-generator
+  lifecycle:
+    timeout-per-shutdown-phase: 20s
+  kafka:
+    # Host processes use `localhost:9092`; a container needs `kafka:29092`.
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    client-id: event-generator
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+      # Idempotent producer: one in-flight guarantee with acks=all.
+      acks: all
+      compression-type: lz4
+      properties:
+        linger.ms: 5
+        batch.size: 65536
+        max.in.flight.requests.per.connection: 5
+        delivery.timeout.ms: 60000
+    admin:
+      # Bounds how long topic provisioning and the Kafka health check wait
+      # before reporting an unreachable broker.
+      operation-timeout: 15s
+      properties:
+        # Raw Kafka client property: milliseconds, not a duration string.
+        request.timeout.ms: 10000
+
+server:
+  shutdown: graceful
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: never
+  info:
+    env:
+      enabled: true
+
+info:
+  application:
+    name: event-generator
+    milestone: MVP-1
+
+coobi:
+  generator:
+    mode: ${GENERATOR_MODE:NORMAL}
+    vehicle-count: ${VEHICLE_COUNT:1000}
+    target-events-per-second: ${TARGET_EVENTS_PER_SECOND:1000}
+    publish-enabled: ${GENERATOR_PUBLISH_ENABLED:true}
+    tick-interval-millis: 100
+    throughput-log-interval-millis: 30000
+    load-test:
+      vehicle-count: ${LOAD_TEST_VEHICLE_COUNT:5000}
+      target-events-per-second: ${LOAD_TEST_TARGET_EVENTS_PER_SECOND:20000}
+    simulation:
+      # Deterministic trajectories: the same seed always replays the same fleet.
+      random-seed: ${GENERATOR_RANDOM_SEED:20260101}
+      # Demo area centred on the city used by the event contract example.
+      center-latitude: 39.4699
+      center-longitude: -0.3763
+      area-radius-kilometres: 30.0
+      min-speed-kph: 0.0
+      max-speed-kph: 110.0
+      max-speed-delta-kph: 5.0
+      max-heading-delta-degrees: 12.0
+      # Longest simulated step applied to a single update, so a stalled
+      # generator cannot produce an unrealistic jump.
+      max-elapsed-seconds: 10.0
+      vehicle-id-prefix: TRUCK-
+  kafka:
+    topics:
+      location: logistics.vehicle.location.v1
+      dead-letter: logistics.vehicle.location.dlq.v1
+      partitions: 6
+      replication-factor: 1
+    initialization:
+      enabled: true
+      max-attempts: 5
+      retry-backoff-millis: 3000
+      request-timeout-millis: 15000
+
+logging:
+  level:
+    com.coobi.logistics.eventgenerator: INFO
+    org.apache.kafka: WARN
