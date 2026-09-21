@@ -1,4 +1,4 @@
-# Coobi Logistics - logistics-api (MVP-5).
+# Coobi Logistics - logistics-api (MVP-5 and MVP-6).
 #
 # Configuration is environment-variable based. The variables written as
 # `${VARIABLE:default}` are the documented contract shared with `.env.example`
@@ -69,7 +69,7 @@ management:
 info:
   application:
     name: logistics-api
-    milestone: MVP-5
+    milestone: MVP-6
 
 coobi:
   statistics:
@@ -82,6 +82,33 @@ coobi:
       metrics-url: ${STREAM_PROCESSOR_METRICS_URL:http://localhost:8081/actuator/metrics}
       processed-events-metric: kafka.streams.process.total
       timeout: 2s
+  # MVP-6: what a browser may receive, and what it may cost.
+  #
+  # A stream never forwards the throughput of the pipeline: every tick reads the read model and
+  # sends at most `max-alerts-per-poll` and `max-vehicles-per-poll` events, so the volume one
+  # browser receives is a property of this configuration and not of the load of the stack. The
+  # interval of the statistics stream is a rate as well, not a poll that always runs: an
+  # endpoint with no browser connected has no ticker, so an idle API reads nothing at all.
+  #
+  # The five `${COOBI_STREAM_*}` entries are the documented contract shared with `.env.example`
+  # and README.md; `buffer-size` and `heartbeat-interval` are documented in
+  # docs/logistics-api.md and can still be overridden with relaxed binding.
+  stream:
+    events:
+      # How often the read model is inspected for events that are new since the previous tick.
+      poll-interval: ${COOBI_STREAM_EVENTS_POLL_INTERVAL:1s}
+      max-alerts-per-poll: ${COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL:20}
+      max-vehicles-per-poll: ${COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL:30}
+    statistics:
+      # How often the live statistics are read and sent to every connected browser.
+      interval: ${COOBI_STREAM_STATISTICS_INTERVAL:1s}
+    client:
+      # Above this the endpoint answers 503 instead of holding a connection it cannot serve.
+      max-subscribers: ${COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS:32}
+      # Frames held for one browser that has not read them; the oldest is dropped when full.
+      buffer-size: 256
+      # A connection that has nothing to say is told so, which keeps proxies from closing it.
+      heartbeat-interval: 15s
 
 logging:
   level:

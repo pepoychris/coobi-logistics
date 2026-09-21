@@ -3,6 +3,8 @@ package com.coobi.logistics.logisticsapi.alert;
 import jakarta.persistence.criteria.Predicate;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -43,4 +45,24 @@ public interface AlertRepository
                     : builder.and(predicates.toArray(new Predicate[0]));
         };
     }
+
+    /**
+     * The newest stored alert.
+     *
+     * <p>Its key is where the event stream of MVP-6.1 starts: the id is generated in order, so
+     * "the newest key" is a position in the table that a stream can continue from without a
+     * timestamp and without reading the rows it skipped.
+     *
+     * @return the alert with the highest key, or empty when no alert is stored
+     */
+    Optional<AlertRecord> findFirstByOrderByIdDesc();
+
+    /**
+     * The newest alerts stored after one key, newest first.
+     *
+     * @param id key to start after
+     * @param pageable page request that bounds how many alerts are read
+     * @return the alerts, newest first
+     */
+    List<AlertRecord> findByIdGreaterThanOrderByIdDesc(long id, Pageable pageable);
 }

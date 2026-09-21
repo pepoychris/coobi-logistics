@@ -107,6 +107,31 @@ class ApiEnvironmentContractTest {
                 .contains("${POSTGRES_PASSWORD:");
     }
 
+    @Test
+    void readsTheStreamSettingsFromTheDocumentedVariables() throws IOException {
+        Binder binder = binder(Map.of(
+                "COOBI_STREAM_EVENTS_POLL_INTERVAL", "250ms",
+                "COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL", "5",
+                "COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL", "6",
+                "COOBI_STREAM_STATISTICS_INTERVAL", "2s",
+                "COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS", "8"));
+
+        assertThat(bind(binder, "coobi.stream.events.poll-interval", String.class)).isEqualTo("250ms");
+        assertThat(bind(binder, "coobi.stream.events.max-alerts-per-poll", Integer.class)).isEqualTo(5);
+        assertThat(bind(binder, "coobi.stream.events.max-vehicles-per-poll", Integer.class)).isEqualTo(6);
+        assertThat(bind(binder, "coobi.stream.statistics.interval", String.class)).isEqualTo("2s");
+        assertThat(bind(binder, "coobi.stream.client.max-subscribers", Integer.class)).isEqualTo(8);
+
+        // The numbers that bound one browser rather than the whole stack are documented in the
+        // service documentation and overridable the same way, without an entry of their own.
+        assertThat(bind(binder(Map.of()), "coobi.stream.client.buffer-size", Integer.class)).isEqualTo(256);
+        assertThat(bind(binder(Map.of()), "coobi.stream.client.heartbeat-interval", String.class)).isEqualTo("15s");
+        assertThat(applicationYaml())
+                .contains("${COOBI_STREAM_STATISTICS_INTERVAL:")
+                .contains("${COOBI_STREAM_EVENTS_POLL_INTERVAL:")
+                .contains("${COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS:");
+    }
+
     private static <T> T bind(Binder binder, String key, Class<T> type) {
         return binder.bind(key, type)
                 .orElseThrow(() -> new IllegalStateException(key + " did not bind"));

@@ -1,5 +1,9 @@
 package com.coobi.logistics.logisticsapi.vehicle;
 
+import java.time.Instant;
+import java.util.List;
+import java.util.Optional;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
@@ -34,4 +38,24 @@ public interface VehicleLatestStateRepository
                 ? builder.conjunction()
                 : builder.equal(root.get("status"), status);
     }
+
+    /**
+     * The vehicle state with the newest telemetry.
+     *
+     * <p>Its event time is where the event stream of MVP-6.1 starts. The column is indexed
+     * ({@code vehicle_latest_state_last_update_idx}), so the position of the live edge is read
+     * from the index instead of from the fleet.
+     *
+     * @return the newest state, or empty when no telemetry has ever been stored
+     */
+    Optional<VehicleLatestState> findFirstByOrderByLastUpdateDesc();
+
+    /**
+     * The newest vehicle states whose telemetry is more recent than one instant, newest first.
+     *
+     * @param lastUpdate event time to start after
+     * @param pageable page request that bounds how many states are read
+     * @return the states, newest first
+     */
+    List<VehicleLatestState> findByLastUpdateGreaterThanOrderByLastUpdateDesc(Instant lastUpdate, Pageable pageable);
 }

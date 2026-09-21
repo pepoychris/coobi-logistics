@@ -16,7 +16,7 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-5 - Logistics REST API.**
+**MVP-5 - Logistics REST API, and MVP-6 - real-time browser streaming.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -42,6 +42,14 @@ The REST API is implemented (MVP-5): `services/logistics-api` is a Spring Boot s
 answers the operator views - the fleet, the alerts and the live statistics - over
 `/api/v1`, reading the state the processor derived and reporting a value whose source cannot
 be read as absent instead of inventing it.
+See [docs/logistics-api.md](docs/logistics-api.md).
+
+The browser streams are implemented (MVP-6): the same service answers
+`GET /api/v1/stream/events` and `GET /api/v1/stream/statistics` with Server-Sent Events, so a
+dashboard draws the events of the pipeline and the live statistics without polling. The events
+a browser may see are the ones the processor already stored, sampled into a bounded tick
+instead of forwarded from Kafka, and a stream nobody watches costs nothing: its ticker exists
+only while a browser is connected.
 See [docs/logistics-api.md](docs/logistics-api.md).
 
 The frontend arrives in the following milestone, which is tracked in the implementation
@@ -89,6 +97,11 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `STOPPED_WINDOW_SECONDS` | Time a vehicle must stay effectively stationary before it is reported as stopped | `300` | seconds |
 | `MOVEMENT_THRESHOLD_METERS` | Total distance below which movement counts as "no movement" over the stopped window | `50` | metres |
 | `STREAM_PROCESSOR_METRICS_URL` | Actuator metrics endpoint of the stream processor, read by `GET /api/v1/statistics` | `http://localhost:8081/actuator/metrics` | URL |
+| `COOBI_STREAM_EVENTS_POLL_INTERVAL` | How often the event stream reads the read model for events new since the previous tick | `1s` | duration (`250ms`, `2s`) |
+| `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL` | Most alerts one tick of the event stream may carry | `20` | alerts (count) |
+| `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` | Most vehicle states one tick of the event stream may carry | `30` | vehicle states (count) |
+| `COOBI_STREAM_STATISTICS_INTERVAL` | How often the statistics stream reads and sends the live statistics | `1s` | duration (`250ms`, `2s`) |
+| `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS` | Browsers one stream serves at a time; the next connection is answered `503` | `32` | connections (count) |
 
 Each service reads these variables from its own environment, and a value already
 present in that environment wins over any fallback baked into the service. `compose.yml`
@@ -99,7 +112,8 @@ interpolates `$` in `.env`, a literal dollar sign inside a value must be doubled
 are consumed by the services: `KAFKA_BOOTSTRAP_SERVERS`, the vehicle simulator
 variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and `SPEED_LIMIT`,
 `STOPPED_WINDOW_SECONDS` and `MOVEMENT_THRESHOLD_METERS` by the stream processor
-(MVP-2 and MVP-3).
+(MVP-2 and MVP-3), and `STREAM_PROCESSOR_METRICS_URL` and the `COOBI_STREAM_*` variables by
+the logistics-api (MVP-5 and MVP-6).
 
 `.env` is listed in `.gitignore` and must never be committed. No credential is
 versioned in this repository: `POSTGRES_PASSWORD` is documented with an empty value, and
@@ -290,8 +304,9 @@ contract, the validation rules, the alert contract and the troubleshooting table
 
 `services/logistics-api` is the read side of the stack. It answers the operator views from
 the state the processor has already persisted, and it writes nothing: it maps the tables of
-MVP-4, it owns no migration and its connection pool is read-only. It ships a Maven wrapper
-and needs only the PostgreSQL of the local stack:
+MVP-4, it owns no migration and its connection pool is read-only. It also serves the two
+browser streams of MVP-6, which are views of that same state rather than a second copy of it.
+It ships a Maven wrapper and needs only the PostgreSQL of the local stack:
 
 ```powershell
 docker compose up -d
@@ -310,10 +325,13 @@ docker compose up -d
 | --- | --- |
 | Base path | `/api/v1` |
 | Endpoints | `GET /api/v1/vehicles`, `GET /api/v1/vehicles/{vehicleId}`, `GET /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `GET /api/v1/statistics` |
+| Streams | `GET /api/v1/stream/events` and `GET /api/v1/stream/statistics`, Server-Sent Events that stay open: the `alert` and `vehicle` events that happen while a browser is connected, and the live statistics re-sent every interval |
 | Vehicles | One page of the fleet, newest telemetry first, optionally filtered by `status`; an unknown vehicle is a `404` |
 | Alerts | One page of alerts, newest first, filtered independently by `vehicleId`, `type` and `severity`; an unknown alert is a `404` |
 | Paging | `page` from `0`, `size` between `1` and `100`; the order of a page is fixed by the endpoint so paging is stable |
 | Statistics | `processedEvents` and `eventsPerSecond` from the Kafka Streams counters of the processor, `activeVehicles` and `alertsGenerated` counted in the database, `uptimeSeconds` of this instance - a source that cannot be read is reported as `null` |
+| Bounded streams | A tick carries at most `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL` alerts and `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` vehicle states, a burst is sampled rather than queued, a browser that stops reading loses its oldest frames, and a stream with no browser connected has no ticker at all |
+| Stream configuration | `COOBI_STREAM_EVENTS_POLL_INTERVAL`, `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL`, `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL`, `COOBI_STREAM_STATISTICS_INTERVAL` (`1s` by default) and `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS`; a stream at capacity answers `503` |
 | Persistence | Reads `vehicles`, `vehicle_latest_state` and `alerts`; creates nothing and writes nothing |
 | Database | `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` of the local stack, or the standard `SPRING_DATASOURCE_*` overrides |
 | Errors | RFC 9457 problem details: `400` for a parameter the client can correct, `404` for an unknown resource, `500` without internals |
