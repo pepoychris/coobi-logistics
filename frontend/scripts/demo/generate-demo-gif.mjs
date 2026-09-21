@@ -11,6 +11,11 @@
  * the ffmpeg that ships with Playwright is a stripped build that knows no PNG
  * decoder and no GIF muxer.
  *
+ * The pages are captured at twice their CSS size and averaged down to the width
+ * of the file, so every pixel of the recording is the mean of several pixels of
+ * the page: the roads, the lane markings and the mini vehicles arrive in the
+ * README sharper than a screenshot taken at the size of the GIF would.
+ *
  *   PLAYWRIGHT_MODULE_DIR  a directory that holds a `playwright` package
  *   PLAYWRIGHT_CHROMIUM    the browser executable to drive, when the default is not wanted
  *
@@ -33,18 +38,119 @@ const require = createRequire(import.meta.url)
 const OUTPUT = resolve(fileURLToPath(new URL('../../../docs/assets/coobi-fleet-demo.gif', import.meta.url)))
 
 /** The size of the page the GIF shows, in CSS pixels. */
-const VIEWPORT = { width: 1180, height: 760 }
+const VIEWPORT = { width: 1440, height: 900 }
+
+/**
+ * Device pixels captured per CSS pixel of the page.
+ *
+ * The capture is wider than the file, and the downscale is the whole point: it
+ * is what turns the captions, the lane markings and the mini vehicles of the
+ * console into something a reader can make out at the width of a README.
+ */
+const DEVICE_SCALE_FACTOR = 2
 
 /** The width of the GIF itself; the height follows the shape of the page. */
-const GIF_WIDTH = 900
+const GIF_WIDTH = 1280
 
 /** How long the recording runs, how often a frame is captured, and its colours. */
-const FRAME_COUNT = 40
-const FRAME_INTERVAL_MS = 200
-const MAX_COLOURS = 128
+const FRAME_COUNT = 72
+const FRAME_INTERVAL_MS = 150
+const MAX_COLOURS = 256
 
 /** How many vehicles the scripted fleet drives. */
 const VEHICLES = 140
+
+/** Picks one option of a control of the deck, named by the legend above it. */
+async function choose(page, legend, value) {
+  await page.locator('.deck__select', { hasText: legend }).locator('select').selectOption(value)
+}
+
+/** Flips one of the switches of the deck, named by the tooltip it carries. */
+async function toggle(page, title) {
+  await page.locator(`.switch[title="${title}"]`).click()
+}
+
+/** The switches of the deck, by the tooltip of the label that carries them. */
+const TRAILS = 'Draw a trail behind every moving vehicle'
+
+/**
+ * What the recording does, and the frame each thing happens on.
+ *
+ * The map of the console is its own subject: the file shows a reader changing
+ * the view of a fleet that keeps driving, so the controls of the map are walked
+ * through once - the rendering budget, the layers, the palette and the district
+ * - instead of the recording waiting for the fleet to happen to do something.
+ * Every beat is an input a reader has, and none of them touch the data: the
+ * fleet, the KPIs and the events keep coming from the API throughout.
+ *
+ * The camera is left where `fit` put it: a zoomed-in view of a fleet this wide
+ * reaches past the edge of the district, and a recording that showed the void
+ * beyond the streets would be selling the map short.
+ */
+const BEATS = [
+  {
+    frame: 8,
+    what: 'raise the rendering budget to the ceiling',
+    run: (page) => page.click('.segmented__option:has-text("100")'),
+  },
+  {
+    frame: 24,
+    what: 'take the trails of the fleet away',
+    run: (page) => toggle(page, TRAILS),
+  },
+  {
+    frame: 38,
+    what: 'switch the palette to the survey sheet',
+    run: (page) => choose(page, 'Palette', 'blueprint'),
+  },
+  {
+    frame: 46,
+    what: 'ask for the denser district',
+    run: (page) => choose(page, 'District', 'dense'),
+  },
+  {
+    frame: 56,
+    what: 'put the district back to its usual grid',
+    run: (page) => choose(page, 'District', 'regular'),
+  },
+  {
+    frame: 60,
+    what: 'switch it back to the depot at night',
+    run: (page) => choose(page, 'Palette', 'night-ops'),
+  },
+  {
+    frame: 64,
+    what: 'give the fleet its trails back',
+    run: (page) => toggle(page, TRAILS),
+  },
+  {
+    frame: 66,
+    what: 'drop the budget back to fifty vehicles',
+    run: (page) => page.click('.segmented__option:has-text("50")'),
+  },
+]
+
+/**
+ * Places the beats on the frames of the recording, refusing a script that
+ * could not be played - one beat outside the recording, or two on one frame,
+ * would otherwise leave a file that silently shows less than it says it does.
+ *
+ * @param count how many frames the recording has
+ * @returns the beat of every frame that has one
+ */
+function beatsByFrame(count) {
+  const placed = new Map()
+  for (const beat of BEATS) {
+    if (!Number.isInteger(beat.frame) || beat.frame < 0 || beat.frame >= count) {
+      throw new Error(`the beat at frame ${beat.frame} is outside the ${count} frames of the recording`)
+    }
+    if (placed.has(beat.frame)) {
+      throw new Error(`two beats share frame ${beat.frame}`)
+    }
+    placed.set(beat.frame, beat)
+  }
+  return placed
+}
 
 /** The places a `playwright` package may live on this machine. */
 function playwrightCandidates() {
@@ -248,13 +354,16 @@ async function main() {
   })
 
   try {
-    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: 1 })
+    const page = await browser.newPage({ viewport: VIEWPORT, deviceScaleFactor: DEVICE_SCALE_FACTOR })
     await page.goto(`http://127.0.0.1:${demo.port}/`, { waitUntil: 'load' })
     await page.waitForSelector('.fleet-map__canvas', { timeout: 20_000 })
     await page.waitForFunction(() => document.querySelector('.chip--budget')?.textContent?.includes('drawn in full'), {
       timeout: 20_000,
     })
-    await page.waitForTimeout(2_500)
+    // Long enough for the first frames of the stream to have been drawn, which
+    // is also long enough for the shaders of the map to be compiled: the first
+    // screenshot of a cold page is not the console a reader would see.
+    await page.waitForTimeout(3_000)
 
     const colours = await mapColourCount(page)
     if (colours < 24) {
@@ -262,22 +371,13 @@ async function main() {
     }
     console.log(`the map is drawing: ${colours} distinct colours in the screenshot of the panel`)
 
+    const beats = beatsByFrame(FRAME_COUNT)
     const frames = []
     for (let index = 0; index < FRAME_COUNT; index += 1) {
-      // The recording walks through the controls of the map: the budget is
-      // raised once, the camera is taken closer to the fleet, and then the
-      // whole fleet is fitted again.
-      if (index === 4) {
-        await page.click('.segmented__option:has-text("100")')
-      }
-      if (index === 16) {
-        await page.locator('.fleet-map').focus()
-        for (let step = 0; step < 3; step += 1) {
-          await page.keyboard.press('+')
-        }
-      }
-      if (index === 30) {
-        await page.keyboard.press('f')
+      const beat = beats.get(index)
+      if (beat) {
+        console.log(`frame ${index}: ${beat.what}`)
+        await beat.run(page)
       }
       frames.push(resize(decodePng(await page.screenshot()), GIF_WIDTH))
       await page.waitForTimeout(FRAME_INTERVAL_MS)
@@ -325,9 +425,11 @@ async function main() {
     }
     const bytes = await readFile(OUTPUT)
     console.log(
-      `${frames.length} frames of ${frames[0].width}x${frames[0].height} wrote ${OUTPUT} ` +
-        `(${(bytes.length / 1024).toFixed(0)} KiB; all ${check.expectedFrames} frames read back ` +
-        `pixel for pixel, within ${check.worst.toFixed(2)} levels of the screenshots they were ` +
+      `${frames.length} frames of ${frames[0].width}x${frames[0].height} and ${MAX_COLOURS} colours wrote ` +
+        `${OUTPUT} (${(bytes.length / 1024).toFixed(0)} KiB, ` +
+        `${((frames.length * FRAME_INTERVAL_MS) / 1_000).toFixed(1)}s per loop, captured at ` +
+        `${VIEWPORT.width}x${VIEWPORT.height} x${DEVICE_SCALE_FACTOR}; all ${check.expectedFrames} frames ` +
+        `read back pixel for pixel, within ${check.worst.toFixed(2)} levels of the screenshots they were ` +
         `made of, and the browser drew ${check.colours} colours of one of them)`,
     )
   } finally {
