@@ -16,7 +16,7 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-0.2 - Local Docker infrastructure in place.**
+**MVP-1 - Kafka event producer in place.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -25,9 +25,13 @@ below. The local Docker infrastructure is in place (MVP-0.2): `compose.yml` star
 single-node Kafka broker in KRaft mode and PostgreSQL, and both publish their ports on
 the loopback interface only.
 
-No service is implemented yet. The three backend services and the frontend arrive in
-the following milestones, which are tracked in the implementation roadmap as milestones
-and issues.
+The event generator is implemented (MVP-1): `services/event-generator` is a Spring Boot
+service that simulates a fleet of vehicles and publishes versioned location telemetry to
+Kafka, with a configurable target rate, reproducible topics and a health endpoint. See
+[docs/event-generator.md](docs/event-generator.md).
+
+The stream processor, the REST API and the frontend arrive in the following milestones,
+which are tracked in the implementation roadmap as milestones and issues.
 
 ## Configuration
 
@@ -61,6 +65,12 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `POSTGRES_PASSWORD` | Database password for `POSTGRES_USER` | none - must be set in `.env` | password string |
 | `VEHICLE_COUNT` | Simulated vehicles kept active by the event generator | `1000` | vehicles (count) |
 | `TARGET_EVENTS_PER_SECOND` | Target telemetry publication rate of the event generator | `1000` | events per second |
+| `GENERATOR_MODE` | Operating profile of the event generator: `NORMAL` or `LOAD_TEST` | `NORMAL` | enum |
+| `GENERATOR_PUBLISH_ENABLED` | Whether the event generator publishes telemetry (the topics are still provisioned) | `true` | boolean |
+| `COOBI_KAFKA_INITIALIZATION_ENABLED` | Whether the event generator provisions its Kafka topics on startup; `false` is the switch for starting without a broker | `true` | boolean |
+| `LOAD_TEST_VEHICLE_COUNT` | Simulated vehicles used by the event generator in `LOAD_TEST` mode | `5000` | vehicles (count) |
+| `LOAD_TEST_TARGET_EVENTS_PER_SECOND` | Target publication rate used by the event generator in `LOAD_TEST` mode | `20000` | events per second |
+| `GENERATOR_RANDOM_SEED` | Seed of the deterministic trajectory generator | `20260101` | long |
 | `SPEED_LIMIT` | Speed above which a vehicle is reported as speeding | `120` | kilometres per hour (km/h) |
 | `STOPPED_WINDOW_SECONDS` | Time a vehicle must stay effectively stationary before it is reported as stopped | `300` | seconds |
 | `MOVEMENT_THRESHOLD_METERS` | Total distance below which movement counts as "no movement" over the stopped window | `50` | metres |
@@ -71,7 +81,9 @@ interpolates the `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` entries,
 exported shell variable overrides the value copied into `.env`. Because Compose
 interpolates `$` in `.env`, a literal dollar sign inside a value must be doubled:
 `POSTGRES_PASSWORD=pa$$word` resolves to the value `pa$word`. The remaining variables
-are consumed by the services implemented in later milestones.
+are consumed by the services: `KAFKA_BOOTSTRAP_SERVERS`, the vehicle simulator
+variables and `GENERATOR_RANDOM_SEED` by the event generator (MVP-1), and the detection
+thresholds by the stream processor (MVP-2).
 
 `.env` is listed in `.gitignore` and must never be committed. No credential is
 versioned in this repository: `POSTGRES_PASSWORD` is documented with an empty value, and
@@ -151,6 +163,70 @@ The database is reachable from the host at `localhost:5432` using the `POSTGRES_
 `POSTGRES_USER` and `POSTGRES_PASSWORD` values from `.env`. A containerized service
 reaches it at `postgres:5432`.
 
+## Event Generator
+
+`services/event-generator` simulates the fleet and produces the telemetry that the rest of
+the pipeline consumes. It ships a Maven wrapper, so a local Maven installation is not
+required, and it needs only a running Kafka broker:
+
+```powershell
+docker compose up -d
+.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml spring-boot:run
+```
+
+```bash
+docker compose up -d
+./services/event-generator/mvnw -f services/event-generator/pom.xml spring-boot:run
+```
+
+With the defaults it publishes 1,000 events per second from 1,000 simulated vehicles. The
+documented variables are read from the process environment, so a local run can be
+reconfigured without editing any file:
+
+```powershell
+$env:GENERATOR_MODE="LOAD_TEST"
+$env:LOAD_TEST_TARGET_EVENTS_PER_SECOND="50000"
+.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml spring-boot:run
+```
+
+`GENERATOR_PUBLISH_ENABLED=false` stops the events but keeps the broker requirement: the
+topics are still provisioned and the Kafka health indicator still runs. To start the
+service with no Kafka at all, for example while working offline, disable provisioning as
+well:
+
+```powershell
+$env:GENERATOR_PUBLISH_ENABLED="false"
+$env:COOBI_KAFKA_INITIALIZATION_ENABLED="false"
+$env:MANAGEMENT_HEALTH_KAFKA_ENABLED="false"   # /actuator/health stays UP without Kafka
+.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml spring-boot:run
+```
+
+The broker requirement stays in the shipped defaults, so a normal run fails fast when
+Kafka is unreachable instead of publishing nowhere.
+
+The wrapper needs no local Maven, but it downloads a Maven distribution on first use. If
+`mvnw.cmd` fails under PowerShell 7, for example because of the wrapper download or a
+proxy, an installed Maven is an equivalent fallback:
+`mvn -f services/event-generator/pom.xml test` (or `spring-boot:run`).
+
+| Item | Value |
+| --- | --- |
+| Event contract | `VehicleLocationEvent`, version 1, `eventType=VEHICLE_LOCATION_UPDATED` |
+| Kafka key | `vehicleId` |
+| Topics | `logistics.vehicle.location.v1`, `logistics.vehicle.location.dlq.v1` (6 partitions, replication factor 1) |
+| Health | `GET http://localhost:8080/actuator/health` |
+| Metrics | `GET http://localhost:8080/actuator/metrics/coobi.generator.events` |
+| Tests | `.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml test` |
+
+Topics are provisioned on startup and the operation is idempotent, so a repeated start
+converges on the same topology. The simulator keeps per-vehicle state: positions, speeds
+and headings evolve gradually from a seeded starting area, and they stay valid, which
+means the data downstream services will process behaves like real telemetry instead of
+uncorrelated random points.
+
+Read [docs/event-generator.md](docs/event-generator.md) for the complete configuration
+contract, the simulator model, the observability signals and the troubleshooting table.
+
 ## Repository Layout
 
 ```text
@@ -170,14 +246,16 @@ coobi-logistics/
 └── README.md
 ```
 
-The service, frontend, infrastructure and documentation directories are intentionally
-empty placeholders at this stage.
+`services/event-generator` holds the MVP-1 implementation, including its Maven wrapper and
+[docs/event-generator.md](docs/event-generator.md). The `stream-processor`,
+`logistics-api`, `frontend` and `infrastructure` directories are intentionally empty
+placeholders at this stage.
 
 ## Technology Stack
 
-Java, Spring Boot, Apache Kafka, Kafka Streams, PostgreSQL, Vue 3 with TypeScript,
+Java 21, Spring Boot, Apache Kafka, Kafka Streams, PostgreSQL, Vue 3 with TypeScript,
 Server-Sent Events, Docker and Docker Compose, Testcontainers, and Prometheus with
-Micrometer.
+Micrometer. Backend services are built with Maven.
 
 ## Contributing Workflow
 
