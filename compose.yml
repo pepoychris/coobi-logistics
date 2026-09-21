@@ -1,16 +1,30 @@
-# Coobi Logistics - local development infrastructure (MVP-0.2).
+# Coobi Logistics - local development stack (MVP-0.2, completed by MVP-10).
 #
-# Single-node Apache Kafka broker running in KRaft mode plus PostgreSQL, and the Prometheus
-# that scrapes the two stream services of the pipeline.
-# Every published port is bound to the loopback interface, so the stack is
-# reachable from this machine only (Global Rule 8).
+# One command starts the whole project on a machine with nothing installed but Docker:
 #
-# Values come from `.env` or from the shell environment of the calling process,
-# and an exported shell variable wins over the value copied into `.env`. Compose
-# resolves the interpolation below before it creates any container, so a missing
-# or empty value aborts the command instead of starting an incomplete stack
-# (Global Rule 11). A literal `$` inside a value is written as `$$`, because
-# Compose interpolates `$` in `.env`: `pa$$word` resolves to `pa$word`.
+#   docker compose up --build
+#
+# and what it starts is the complete pipeline, with no host installation of Java, Maven, Node,
+# Kafka or PostgreSQL involved - every build happens inside an image:
+#
+#   kafka             apache/kafka:4.3.1                 single-node KRaft broker (MVP-0.2)
+#   postgres          postgres:18.6                      database of the read model (MVP-0.2)
+#   event-generator   build: ./services/event-generator  telemetry simulator (MVP-1)
+#   stream-processor  build: ./services/stream-processor processing and persistence (MVP-2..4)
+#   logistics-api     build: ./services/logistics-api    REST API and streams (MVP-5 and MVP-6)
+#   frontend          build: ./frontend                  Vue dashboard (MVP-7)
+#   prometheus        prom/prometheus:v3.14.0-busybox    scrapes the two services (MVP-8)
+#
+# Every published port is bound to the loopback interface, so the stack is reachable from this
+# machine only (Global Rule 8). The addresses inside the network are the service names of this
+# file, and each application service is told them explicitly below, because they are properties
+# of the stack rather than of a service.
+#
+# Values come from `.env` or from the shell environment of the calling process, and an exported
+# shell variable wins over the value copied into `.env`. Compose resolves the interpolation below
+# before it creates any container, so a missing or empty value aborts the command instead of
+# starting an incomplete stack (Global Rule 11). A literal `$` inside a value is written as `$$`,
+# because Compose interpolates `$` in `.env`: `pa$$word` resolves to `pa$word`.
 #
 # Copy the template once and set a local password:
 #
@@ -19,12 +33,11 @@
 #
 # Start:  docker compose up --build -d   (canonical local startup, Global Rule 18)
 # Status: docker compose ps
+# Logs:   docker compose logs -f
 # Stop:   docker compose down
 #
-# `--build` is currently a no-op: no service in this stack ships a Dockerfile yet.
-# It stays canonical so the same command keeps working once the application
-# services arrive. `docker compose up -d`, the MVP-0.2 acceptance criterion, is
-# the equivalent command today.
+# docs/deployment.md is the reference of the stack: what each image contains, which health check
+# gates which dependency, and how to verify a running stack.
 
 services:
   kafka:
@@ -88,19 +101,18 @@ services:
   prometheus:
     # The BusyBox flavor of the image, so the health check below can use its `wget`.
     image: prom/prometheus:v3.14.0-busybox
-    environment:
-      # The scrape targets of infrastructure/prometheus/prometheus.yml. The application
-      # services run from the host in this stack - no service ships a Dockerfile yet - so the
-      # default points at the host, and the published ports of the two services are what gets
-      # scraped. Override it to scrape the services from another address.
-      PROMETHEUS_HOST: ${PROMETHEUS_HOST:-host.docker.internal}
     ports:
       # The Prometheus UI, its API and its own health endpoint, on the loopback interface
       # only like the rest of the stack (Global Rule 8).
       - "127.0.0.1:9090:9090"
     extra_hosts:
-      # `host.docker.internal` is provided by Docker Desktop; on a Linux engine this maps it
-      # to the host gateway, so the same definition works on both.
+      # `host.docker.internal` is provided by Docker Desktop; on a Linux engine this maps it to
+      # the host gateway. It is here for the one edit the scrape configuration invites: a target
+      # changed to that name scrapes a service somebody started from the host, on both engines.
+      # The shipped targets are the two service names of this stack, and they are written out in
+      # infrastructure/prometheus/prometheus.yml rather than interpolated here: Prometheus
+      # expands `${VAR}` references of its configuration file only in `external_labels`, not in a
+      # `static_configs.targets` entry, so a variable there would be scraped as its own name.
       - "host.docker.internal:host-gateway"
     volumes:
       # Read-only: the scrape configuration is versioned in this repository, not edited in the
@@ -122,6 +134,128 @@ services:
       timeout: 5s
       retries: 6
       start_period: 10s
+
+  event-generator:
+    build:
+      # The context is the service directory: it is a self-contained Maven project, so the build
+      # of one service never sees the sources of another one.
+      context: ./services/event-generator
+    env_file:
+      # `.env` configures the whole stack: the simulator values documented in `.env.example`
+      # reach this container without being repeated here, and a variable the file does not
+      # define keeps the default its own application.yml declares. The file is optional, so a
+      # stack resolved from the shell environment alone still starts.
+      - path: .env
+        required: false
+    environment:
+      # The one value that has to differ from `.env` inside the network: containers reach the
+      # broker on its in-network listener, not on the `localhost:9092` a host-launched service
+      # uses. It is set here and not interpolated, so a host default in `.env` cannot point the
+      # container at itself.
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+    ports:
+      # The Actuator endpoints of the service: health and the Prometheus exposition of MVP-8.
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      # The generator provisions its topics on startup and fails fast without a broker, so it
+      # waits for one that is ready to serve instead of racing it (MVP-10.3).
+      kafka:
+        condition: service_healthy
+    # An infrastructure container that restarts leaves this one running, and a restart of this
+    # one is a restart of a process that fails fast on a broken configuration, so the stack
+    # converges again instead of staying half up (MVP-10.3).
+    restart: unless-stopped
+    # The service shuts down gracefully, with a shutdown phase the application bounds at 20s;
+    # the default grace period of 10s would cut that phase short.
+    stop_grace_period: 30s
+
+  stream-processor:
+    build:
+      context: ./services/stream-processor
+    env_file:
+      # Same contract as the generator above: the detection thresholds of `.env.example` reach
+      # the container, and the addresses of the network are the ones set below.
+      - path: .env
+        required: false
+    environment:
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092
+      # The processor owns the schema: Flyway applies the migrations of the service to this
+      # database on startup. The values are the ones the `postgres` service of this file is
+      # created with, from the same `.env`, so the two cannot disagree; the URL differs from the
+      # host default of application.yml because the database is a service name inside the
+      # network.
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set to a non-empty value in .env}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+    ports:
+      - "127.0.0.1:8081:8081"
+    depends_on:
+      kafka:
+        condition: service_healthy
+      # Migrating a database that is not accepting connections is a startup failure, and the
+      # migrations are what every other reader of that schema waits for.
+      postgres:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  logistics-api:
+    build:
+      context: ./services/logistics-api
+    env_file:
+      # The bounds of the browser streams of MVP-6 are documented in `.env.example` and reach
+      # the container from there.
+      - path: .env
+        required: false
+    environment:
+      # The API reads the schema the processor migrates, so it is pointed at the same database
+      # with the same values, and at the metrics endpoint of the processor by its service name.
+      # Neither is interpolated from `.env`: a host default such as `localhost:8081` would point
+      # the container at itself.
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set to a non-empty value in .env}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set in .env}
+      STREAM_PROCESSOR_METRICS_URL: http://stream-processor:8081/actuator/metrics
+    ports:
+      - "127.0.0.1:8082:8082"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # The tables of this service are created by the migrations of the processor: an API that
+      # starts before them answers 500 for a schema that does not exist yet, so it waits for the
+      # processor that owns the schema (MVP-10.3). The dependency is on readiness, not on a
+      # running process, and it is not a hard runtime dependency: the API survives a restart of
+      # the processor, and it reports a statistic it cannot read as absent.
+      stream-processor:
+        condition: service_healthy
+    restart: unless-stopped
+    stop_grace_period: 30s
+
+  frontend:
+    build:
+      context: ./frontend
+    environment:
+      # The origin this server proxies `/api` to, and the only value of the dashboard that is
+      # not baked into the bundle: it is substituted into the nginx configuration of the image
+      # when the container starts, so the same image serves any API of the stack. Override it
+      # in `.env` to point the dashboard at an API somewhere else.
+      API_PROXY_TARGET: ${API_PROXY_TARGET:-http://logistics-api:8082}
+    ports:
+      # The dashboard, on the loopback interface like the rest of the stack. It is published on
+      # the port the development server of the frontend uses, so the URL a reader opens is the
+      # same with and without Node installed; the container has to be stopped to run `npm run
+      # dev` next to it.
+      - "127.0.0.1:5173:8080"
+    depends_on:
+      # The page is served before the API is ready, and it draws its disconnected state until
+      # one is; waiting for readiness is what makes the first load a live dashboard instead of a
+      # reconnecting one. The proxy resolves the API per request, so a later restart of the API
+      # is not a restart of this container.
+      logistics-api:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   kafka-data:

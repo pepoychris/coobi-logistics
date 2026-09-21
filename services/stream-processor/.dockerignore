@@ -1,0 +1,16 @@
+# Build context of services/stream-processor/Dockerfile (MVP-10.1).
+#
+# This directory is a self-contained Maven project, so the build needs its pom and its sources
+# and nothing else. The build output of a local run is excluded: the image builds the jar itself,
+# and a `target/` copied into the context would only make the context large and the result
+# ambiguous.
+target/
+**/target/
+
+# Local noise that never belongs in an image.
+*.log
+*.tmp
+.git/
+.gitignore
+.idea/
+.vscode/

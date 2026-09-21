@@ -34,14 +34,16 @@ docker compose ps
 | Configuration | `infrastructure/prometheus/prometheus.yml`, mounted read-only |
 | Scrape interval | `15s`, with a `10s` timeout |
 | Retention | `15d`, in the `prometheus-data` volume |
-| Scrape targets | `event-generator:8080` and `stream-processor:8081`, through `PROMETHEUS_HOST` |
+| Scrape targets | `event-generator:8080` and `stream-processor:8081`, the service names of the stack |
 
-The two application services run from the host in this stack - no service ships a Dockerfile
-yet - so the scrape targets are the published host ports, reached from the container through
-`host.docker.internal`. That name is Docker Desktop's and `compose.yml` also maps it on a
-Linux engine, so the default works on both. `PROMETHEUS_HOST` is the documented override: set
-it to another address to scrape the services from somewhere else, for example
-`PROMETHEUS_HOST=stream-processor` once the applications run as containers of their own.
+The two application services run as containers of the same stack (MVP-10), so a scrape target is
+the service name `compose.yml` gives them, and the scrape needs neither a published host port nor
+the host gateway. The names are written out in the configuration file rather than interpolated
+from the environment, because Prometheus expands `${VAR}` references of that file in
+`external_labels` and nowhere else: the single `PROMETHEUS_HOST` this milestone shipped in a
+target was read by the container, never expanded, and left both targets `down`. To scrape a
+service somebody started from the host instead, change its target to `host.docker.internal:8080`
+or `:8081`; `compose.yml` maps that name on a Linux engine as well as on Docker Desktop.
 
 Both services must be running for their targets to be healthy. Prometheus starts without
 them, so a target is `down` until the service it describes is up; that is the expected state
@@ -57,9 +59,8 @@ of a machine that has only started the infrastructure:
 curl -s http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {scrapeUrl, health, lastError}'
 ```
 
-Prometheus expands the `${PROMETHEUS_HOST}` of its configuration from the environment of the
-container, which `compose.yml` always sets, so the file stays the same on every machine while
-the address it points at does not.
+The file is the single place the targets are defined, and `compose.yml` mounts it read-only, so
+what Prometheus scrapes is what the repository says it scrapes.
 
 ## Enabling the endpoint
 
@@ -235,8 +236,8 @@ The metrics are covered where they are produced rather than asserted from a desc
 
 | Symptom | Cause and fix |
 | --- | --- |
-| A target is `down` in Prometheus | The service is not running, or it listens on another port. Start it from the host, and keep the documented ports (`server.port` 8080 and 8081) or change the target in `infrastructure/prometheus/prometheus.yml` |
-| A target is `down` with a connection error on Linux | The container cannot reach the host. `compose.yml` maps `host.docker.internal` to the host gateway for that reason; check that the mapping survived any local override of the file |
+| A target is `down` in Prometheus | The service it names is not running, or its target was edited to an address that does not answer. `docker compose ps` shows whether the service is up, and `docker compose logs <service>` why it is not |
+| A target is `down` with a connection error on Linux | The target was pointed at `host.docker.internal` for a service running on the host, and the container cannot reach it. `compose.yml` maps that name to the host gateway for that reason; check that the mapping survived any local override of the file |
 | `/actuator/prometheus` answers `404` | The registry is not exported. The dependency and `management.prometheus.metrics.export.enabled` are both required; a missing one makes the endpoint disappear rather than report an empty body |
 | A counter of the contract is missing | The service producing it is not running that stage. A counter is registered when the service starts and incremented when a record reaches it, so a missing metric means a version mismatch, not an idle pipeline |
 | A metric appears in `/actuator/metrics` but not in Prometheus | The registry renames it. Check its name in the exposition format: dots become underscores, a timer carries its base unit (`_seconds`) and a counter ends in `_total` |

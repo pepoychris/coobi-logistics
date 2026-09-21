@@ -1,19 +1,21 @@
-# Coobi Logistics - Prometheus scrape configuration (MVP-8.2).
+# Coobi Logistics - Prometheus scrape configuration (MVP-8.2, containerized by MVP-10.2).
 #
 # Prometheus reads this file inside its container, so the targets are the addresses of the
 # application services *as seen from that container*:
 #
-#   - the event generator and the stream processor run from the host (Maven or IDE) in this
-#     stack, because no service ships a Dockerfile yet, so their published host ports are
-#     reached through `host.docker.internal`, which `compose.yml` maps to the host;
-#   - `${PROMETHEUS_HOST}` is supplied by the environment of the Prometheus container, and
-#     Prometheus expands it while loading this file. Overriding it is the way to scrape the
-#     two services from a different address, for example once they run in containers of their
-#     own: `PROMETHEUS_HOST=event-generator` reaches a Compose service by name.
+#   - the two services run as containers of the same stack, so a target is the service name
+#     `compose.yml` gives them, which is what makes the scrape survive without a published host
+#     port and without the host gateway;
+#   - the names are written out here and not interpolated from the environment, because
+#     Prometheus expands `${VAR}` references of its configuration in `external_labels` and
+#     nowhere else: a variable in a `static_configs.targets` entry is scraped as its own name
+#     (MVP-8 shipped one, and it never resolved). To scrape a service somebody started from the
+#     host instead of the container, change its target below to `host.docker.internal:<port>`,
+#     which `compose.yml` maps on a Linux engine as well.
 #
 # The ports below are the documented defaults of the two services (`server.port` 8080 for the
-# generator and 8081 for the processor). A service started with a different `SERVER_PORT`
-# needs its target changed here as well.
+# generator and 8081 for the processor, the ports their images expose). A service started with a
+# different `SERVER_PORT` needs its target changed here as well.
 
 global:
   # Fifteen seconds keeps the local stack cheap to run and still resolves a throughput spike
@@ -35,9 +37,9 @@ scrape_configs:
   - job_name: event-generator
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["${PROMETHEUS_HOST}:8080"]
+      - targets: ["event-generator:8080"]
 
   - job_name: stream-processor
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ["${PROMETHEUS_HOST}:8081"]
+      - targets: ["stream-processor:8081"]
