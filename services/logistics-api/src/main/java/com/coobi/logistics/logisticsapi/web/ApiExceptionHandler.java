@@ -1,5 +1,6 @@
 package com.coobi.logistics.logisticsapi.web;
 
+import com.coobi.logistics.logisticsapi.stream.StreamCapacityExceededException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.ConstraintViolationException;
 import java.net.URI;
@@ -40,6 +41,12 @@ import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExcep
  * <p>Anything else is answered with {@code 500} and a generic message: the cause is logged
  * with the request path, and the client is not told about the internals of the service.
  *
+ * <p>A browser that went away while a stream was being written to it is deliberately not
+ * handled here. {@code ResponseEntityExceptionHandler}, the base of this advice, already maps
+ * {@code AsyncRequestNotUsableException} - there is nobody left to answer - and a second
+ * mapping for it makes the framework refuse to build the resolver at all ("Ambiguous
+ * @ExceptionHandler method mapped for ..."), which takes the whole context down with it.
+ *
  * <p>The advice is ordered first so that these bodies - not the ones the framework would
  * produce - are the error contract clients see.
  */
@@ -52,6 +59,16 @@ public class ApiExceptionHandler extends ResponseEntityExceptionHandler {
     @ExceptionHandler(ApiNotFoundException.class)
     ProblemDetail handleNotFound(ApiNotFoundException notFound, HttpServletRequest request) {
         return problem(HttpStatus.NOT_FOUND, "Not Found", notFound.getMessage(), request);
+    }
+
+    /**
+     * A stream that already serves its maximum number of browsers. The answer is
+     * {@code 503} rather than a queue: the API refuses the connection instead of holding one
+     * it cannot serve, and a browser may open it again when a slot is free.
+     */
+    @ExceptionHandler(StreamCapacityExceededException.class)
+    ProblemDetail handleStreamFull(StreamCapacityExceededException full, HttpServletRequest request) {
+        return problem(HttpStatus.SERVICE_UNAVAILABLE, "Service Unavailable", full.getMessage(), request);
     }
 
     /**

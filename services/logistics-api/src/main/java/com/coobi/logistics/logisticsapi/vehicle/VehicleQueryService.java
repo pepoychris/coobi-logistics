@@ -2,7 +2,10 @@ package com.coobi.logistics.logisticsapi.vehicle;
 
 import com.coobi.logistics.logisticsapi.web.ApiNotFoundException;
 import com.coobi.logistics.logisticsapi.web.PageResponse;
+import java.time.Instant;
+import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -61,6 +64,34 @@ public class VehicleQueryService {
         return vehicles.findById(vehicleId)
                 .map(VehicleQueryService::toResponse)
                 .orElseThrow(() -> new ApiNotFoundException("no vehicle with id '" + vehicleId + "'"));
+    }
+
+    /**
+     * The event time of the newest telemetry stored.
+     *
+     * <p>It is where the live event stream (MVP-6.1) starts, so a stream carries the movement
+     * that happens while it is open instead of replaying the fleet this paged endpoint serves.
+     *
+     * @return the newest {@code lastUpdate}, or empty when no telemetry has ever been stored
+     */
+    public Optional<Instant> liveEdge() {
+        return vehicles.findFirstByOrderByLastUpdateDesc().map(VehicleLatestState::getLastUpdate);
+    }
+
+    /**
+     * The newest vehicle states whose telemetry is more recent than one instant.
+     *
+     * @param lastUpdate event time to start after
+     * @param limit maximum number of states to answer with; when more were updated, the newest
+     *        ones are the ones returned, so a reader that streams them stays at the live edge
+     * @return the states as the API reports them, newest first, at most {@code limit} of them
+     */
+    public List<VehicleResponse> newerThan(Instant lastUpdate, int limit) {
+        return vehicles
+                .findByLastUpdateGreaterThanOrderByLastUpdateDesc(lastUpdate, PageRequest.of(0, limit))
+                .stream()
+                .map(VehicleQueryService::toResponse)
+                .toList();
     }
 
     private static VehicleResponse toResponse(VehicleLatestState state) {

@@ -1,13 +1,17 @@
-# Logistics REST API (MVP-5)
+# Logistics REST API (MVP-5 and MVP-6)
 
 `services/logistics-api` is the read side of the stack: a Spring Boot service that answers the
 operator views - the fleet, the alerts and the live statistics - from the state the stream
 processor has already derived and persisted. It owns no migration and writes no row: it maps
-the tables of MVP-4 and serves them as JSON.
+the tables of MVP-4 and serves them as JSON, and it also serves the two browser streams of
+MVP-6 - the events that happen while a browser is connected, and the live statistics - as
+Server-Sent Events.
 
 ```text
 browser / client
       │  HTTP  :8082
+      │    ├─ JSON, one request per view
+      │    └─ SSE, one connection per stream (the dashboard of MVP-7)
       ▼
 logistics-api  ──reads──▶  PostgreSQL  ◀──writes──  stream-processor (MVP-4)
       │
@@ -56,10 +60,24 @@ contract and are kept in sync with `.env.example` and README.md.
 | `SPRING_DATASOURCE_USERNAME` | Overrides the database role | `POSTGRES_USER` | role name |
 | `SPRING_DATASOURCE_PASSWORD` | Overrides the database password | `POSTGRES_PASSWORD` | string |
 | `STREAM_PROCESSOR_METRICS_URL` | Actuator metrics endpoint of the stream processor, read by `/api/v1/statistics` | `http://localhost:8081/actuator/metrics` | URL |
+| `COOBI_STREAM_EVENTS_POLL_INTERVAL` | How often `/api/v1/stream/events` reads the read model for what is new since the previous tick | `1s` | duration (`250ms`, `2s`) |
+| `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL` | Most alerts one tick of the event stream may carry | `20` | alerts (count) |
+| `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL` | Most vehicle states one tick of the event stream may carry | `30` | vehicle states (count) |
+| `COOBI_STREAM_STATISTICS_INTERVAL` | How often `/api/v1/stream/statistics` reads and sends the live statistics | `1s` | duration (`250ms`, `2s`) |
+| `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS` | Browsers one stream serves at a time; the next connection is answered `503` instead of being held | `32` | connections (count) |
 
 The `POSTGRES_*` variables are the ones `.env` already holds for the Compose service, so one
 file configures the stack and every service. The `SPRING_DATASOURCE_*` names are the standard
-Spring overrides and win over them.
+Spring overrides and win over them. The `COOBI_STREAM_*` variables are the ones that bound what
+a browser may receive and what one may cost; they are documented in `.env.example` too, and
+their placeholders in `application.yml` are asserted by `ApiEnvironmentContractTest`.
+
+Two client settings have no variable of their own because they are properties of the response
+format rather than of a deployment - the frames held for one browser that has not read them
+(`coobi.stream.client.buffer-size`, `256`) and how long a quiet connection may stay silent
+(`coobi.stream.client.heartbeat-interval`, `15s`). They are documented in
+[Streams](#streams) and overridable with relaxed binding, for example
+`COOBI_STREAM_CLIENT_BUFFER_SIZE=64`.
 
 Every other setting lives in
 [`application.yml`](../services/logistics-api/src/main/resources/application.yml) and can still
@@ -82,7 +100,8 @@ error: the statistics endpoint stays available and reports those fields as absen
 
 ## Endpoints
 
-Base path: `/api/v1`. Every response is JSON.
+Base path: `/api/v1`. Every response is JSON, except the two streams, which are
+`text/event-stream` responses that stay open ([Streams](#streams)).
 
 | Method | Path | Purpose |
 | --- | --- | --- |
@@ -91,6 +110,8 @@ Base path: `/api/v1`. Every response is JSON.
 | `GET` | `/api/v1/alerts` | One page of alerts, newest first |
 | `GET` | `/api/v1/alerts/{id}` | One stored alert |
 | `GET` | `/api/v1/statistics` | Live statistics of the stack |
+| `GET` | `/api/v1/stream/events` | Server-Sent Events: the alerts and vehicle states that happen while a browser is connected, sampled |
+| `GET` | `/api/v1/stream/statistics` | Server-Sent Events: the live statistics, re-sent at the configured interval |
 | `GET` | `/actuator/health` | Health of the service, including the database |
 | `GET` | `/actuator/info` | Build and milestone information |
 
@@ -225,6 +246,111 @@ second reading, and why it averages the whole window when a reading in between f
 The counters are read per API instance: two instances report the same `processedEvents`, since
 that number belongs to the processor, and each derives its own rate from its own readings.
 
+## Streams
+
+Two endpoints answer with Server-Sent Events instead of with a document: the events that happen
+while a browser is connected, and the live statistics. Both are one long-lived response - the
+request is answered as soon as a connection is accepted, and the connection ends when the
+browser closes it, when a write to it fails, or when the service shuts down, never because a
+timeout expired.
+
+| Endpoint | Carries | Rate |
+| --- | --- | --- |
+| `GET /api/v1/stream/events` | `alert` events for the alerts the processor stored, `vehicle` events for the vehicle states it updated | One tick every `coobi.stream.events.poll-interval` (`COOBI_STREAM_EVENTS_POLL_INTERVAL`, `1s`) |
+| `GET /api/v1/stream/statistics` | `statistics` events, the object `GET /api/v1/statistics` answers | One tick every `coobi.stream.statistics.interval` (`COOBI_STREAM_STATISTICS_INTERVAL`, the documented `1s` default) |
+
+### The frames
+
+A connection opens with one frame that carries no event:
+
+```text
+retry:3000
+:connected
+
+```
+
+`retry` tells the browser to wait three seconds before reconnecting, which is the normal answer
+here: a connection that ends - a proxy with an idle timeout, a restart - is reopened by the
+browser on its own, and the stream then continues at the live edge while the history stays a
+page fetched over REST. The comment is what commits the response, so a browser reports the
+connection as open immediately, instead of only when the first event happens.
+
+An event names its family and carries the response of the REST endpoint that owns the same
+object, so a client reads the same field names in the stream and in the API and dispatches on a
+name instead of on the shape of a document:
+
+```text
+event:alert
+data:{"id":7,"eventId":"2f8d3c1e-0b52-4a4f-9d76-8e13a3f0c111","vehicleId":"TRUCK-00001", ...}
+
+event:vehicle
+data:{"vehicleId":"TRUCK-00002","latitude":39.4699,"longitude":-0.3763, ...}
+```
+
+A frame is one `event:` line, one `data:` line and the blank line that closes it; the payloads
+above are abbreviated, and they are the objects of [Vehicles](#vehicles) and
+[Alerts](#alerts) field for field. A connection that has nothing else to say sends a comment,
+`:keep-alive`, after `coobi.stream.client.heartbeat-interval` (`15s`), which keeps an
+intermediary from closing a stream that is merely quiet. A comment is not an event: a client
+ignores it.
+
+### What a browser may receive
+
+The stream is a view of the pipeline, not a pipe from it. The topic is never forwarded - there
+is no browser-facing publisher, and this service deliberately does not subscribe to Kafka -
+so the events a browser may see are the ones the processor has already stored: the alerts it
+accepted and the vehicle states it overwrote. A tick reads what was stored since the previous
+one and sends at most `max-alerts-per-poll` alerts and `max-vehicles-per-poll` vehicle states,
+oldest first, so what one browser receives is a property of this configuration and not of the
+load of the stack: a second in which the pipeline processed thousands of records is still one
+tick's worth of events.
+
+A burst that does not fit in one tick is sampled rather than queued - the cursor moves to the
+newest record of the batch, so the newest events are the ones sent and the browser stays at the
+live edge instead of being shown an hour of history one tick at a time. A vehicle whose state
+was overwritten twice between two ticks is one event, not two: the read model keeps one row per
+vehicle (MVP-4), and the stream reports what the state is now rather than what it was.
+
+The two families are positioned differently, and it shows in one case. An alert is positioned by
+its stored key, which is generated in order, so every alert stored after the previous tick is
+either sent or deliberately skipped. A vehicle is positioned by the event time of its telemetry,
+so two vehicles whose telemetry carries exactly the same timestamp can leave one of them to the
+REST view: the stream is a sample, and the row it skipped is still a page of
+`/api/v1/vehicles`.
+
+The history is not streamed. The feed is placed at the live edge when the first browser
+connects to a quiet stream, and the past is what `/api/v1/alerts` and `/api/v1/vehicles` serve
+as pages.
+
+### What a browser may cost
+
+Bounded on purpose, in three places, because a browser is a client this service does not
+control:
+
+| Bound | Setting | Behaviour when it is reached |
+| --- | --- | --- |
+| Connections per stream | `coobi.stream.client.max-subscribers` (`COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS`, `32`) | The next connection is answered `503` with a problem detail instead of being queued: the service refuses a connection it cannot serve, and the browser may open it again when a slot is free |
+| Frames held per connection | `coobi.stream.client.buffer-size` (`256`) | The oldest frame of that connection is dropped to make room for the newest, so a browser that stopped reading - a suspended laptop, a stalled network - costs the service a fixed amount of memory and not a growing one; the client sees a gap |
+| Silence before a heartbeat | `coobi.stream.client.heartbeat-interval` (`15s`) | A comment frame is written, which is what keeps intermediaries from closing a quiet connection |
+
+Each connection is drained by a virtual thread of its own, so a browser that reads slowly blocks
+nothing but itself: the ticker never waits on a socket, and no connection can slow another one
+down. An event is serialized once per tick and not once per connection, so the cost of a tick
+grows with the size of the event and not with the number of browsers.
+
+Nothing at all runs while nobody is connected. The ticker of a stream is created with the first
+connection of a quiet period and cancelled with the last one, so an API nobody watches reads
+neither the read model nor the statistics, and its event rate is a rate that is never exceeded
+rather than a poll that always runs.
+
+### When the browser goes away
+
+A disconnect is noticed by the next write that fails on the connection, or by the completion
+callback of the framework, whichever comes first; the connection is then removed, its pump
+thread is woken, and the stream goes back to having no ticker once it is the last one. A
+browser that closed its page is not a failure of this service, so it is logged at `DEBUG` and
+the connection is not held until a timeout.
+
 ## Errors
 
 Every failure is answered with an RFC 9457 problem detail - never with a stack trace, and never
@@ -255,6 +381,10 @@ with the default body of the framework.
 | Statistics without the processor | One `WARN` log line, then `DEBUG` until it answers again |
 | A metric the processor does not publish | `DEBUG` log line naming the metric and the response status |
 | Unreadable alert metadata | `WARN` log line naming the alert; the row is reported as text and the page is still served |
+| Browsers connected to a stream | Gauge `coobi.stream.subscribers`, tagged `stream=events` or `stream=statistics`, at `GET http://localhost:8082/actuator/metrics/coobi.stream.subscribers` |
+| Frames a browser did not read in time | Counter `coobi.stream.dropped`, tagged by stream, plus a `DEBUG` log line naming the connection |
+| A stream that refuses a connection | `503` problem detail naming the stream and its maximum; the capacity is the configured one |
+| A browser that went away, an event that cannot be serialized | `DEBUG` line for the first, `WARN` line naming the event type for the second; the stream continues in either case |
 | Unhandled failure | `ERROR` log line with the request path |
 
 ## Tests
@@ -277,6 +407,15 @@ summation of the per-thread counter, a derived rate, an unreachable processor, a
 not published and a counter that restarted; another group boots the whole service and checks
 that it reports itself healthy and answers live statistics while the processor is unreachable.
 
+The stream tests drive both endpoints without a browser and without a clock: the ticks are run
+by the test, so what a stream publishes, the interval it is scheduled with, the frames a
+connection receives, the sampling of a burst, the buffer of a connection that fell behind, the
+`503` of a stream at capacity and the release of a connection that went away are all asserted
+deterministically. `StreamingEndpointsTest` then opens the two streams over real HTTP, with the
+intervals configured to milliseconds, and asserts the response headers, the frames, the delay
+between two statistics, the sampling of a burst of ten alerts and the fact that a disconnect is
+given up without a timeout.
+
 `SchemaContractTest` closes the gap that matters most here: this service maps tables it does
 not own, so the test reads the migrations of the stream processor and asserts that the columns
 the entities declare are exactly the columns those migrations create. A column renamed in the
@@ -289,6 +428,10 @@ service that owns the schema fails the build of the service that would break.
 | `GET /api/v1/vehicles` answers `500` with `relation "vehicle_latest_state" does not exist` | The schema was never created. Run the stream processor once so its migrations apply, or apply them with your pipeline. |
 | `processedEvents` is `null` while the stack runs | The processor is unreachable at `STREAM_PROCESSOR_METRICS_URL`, or its metric name differs. Check `GET http://localhost:8081/actuator/metrics` and point the variable at the metric it publishes. |
 | `eventsPerSecond` is `null` on the first request | Expected: a rate needs two readings of a cumulative counter. Poll again after a few seconds. |
+| A stream stays silent while the stack is busy | The streams carry what happens while a browser is connected, and only what is stored: a tick with nothing new sends nothing. The connection is still open - a `:keep-alive` comment arrives after every `coobi.stream.client.heartbeat-interval`. |
+| A stream reconnects every few seconds behind a proxy | An intermediary is closing an idle connection. Lower `COOBI_STREAM_CLIENT_HEARTBEAT_INTERVAL` so the comment arrives before it does, for example `5s`. |
+| `GET /api/v1/stream/events` answers `503` | The stream already serves as many browsers as `COOBI_STREAM_CLIENT_MAX_SUBSCRIBERS` allows. Close a tab, or raise the limit; the service refuses the connection rather than holding one it cannot serve. |
+| The dashboard receives fewer events than the pipeline processed | Expected: a tick is bounded by `COOBI_STREAM_EVENTS_MAX_ALERTS_PER_POLL` and `COOBI_STREAM_EVENTS_MAX_VEHICLES_PER_POLL`, and a burst is sampled instead of queued. Raise them if a view needs more per tick, and read the history over REST. |
 | Startup fails with `Failed to bind properties under 'coobi.statistics'` | The statistics address or the metric name is missing or not a URL. The service refuses to start instead of answering `null` forever. |
 | `/actuator/health` reports `DOWN` | The database indicator cannot reach PostgreSQL. Start `docker compose up -d`, and check that `POSTGRES_PASSWORD` is set in the shell that runs the service. |
 | Every alert answers with `metadata` as a JSON string | The row was written by something other than the processor migration, so its `metadata` is a JSON string rather than a JSON object. Inspect the row; the API reports what it finds instead of failing the page. |
