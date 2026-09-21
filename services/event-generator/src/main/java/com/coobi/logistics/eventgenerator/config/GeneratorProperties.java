@@ -1,6 +1,7 @@
 package com.coobi.logistics.eventgenerator.config;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.DecimalMax;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.Max;
@@ -8,6 +9,7 @@ import jakarta.validation.constraints.Min;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
+import java.time.Duration;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.validation.annotation.Validated;
 
@@ -132,6 +134,20 @@ public class GeneratorProperties {
         return mode == GeneratorMode.LOAD_TEST ? loadTest.getTargetEventsPerSecond() : targetEventsPerSecond;
     }
 
+    /**
+     * How long the active mode publishes before the generator stops on its own:
+     * {@link Duration#ZERO} means no limit.
+     *
+     * <p>The bound belongs to the load-test profile, so a demonstration run cannot be cut
+     * short by it: a bounded run is a property of a benchmark, not of the simulator.
+     */
+    public Duration effectivePublishingDuration() {
+        if (mode != GeneratorMode.LOAD_TEST || loadTest.getDuration() == null) {
+            return Duration.ZERO;
+        }
+        return loadTest.getDuration();
+    }
+
     /** Load-test overrides. */
     public static class LoadTest {
 
@@ -142,6 +158,14 @@ public class GeneratorProperties {
         @Min(1)
         @Max(MAX_EVENTS_PER_SECOND)
         private int targetEventsPerSecond = 20_000;
+
+        /**
+         * Publishing window of a load test; zero, the default, publishes until the service is
+         * stopped. A negative value is rejected at startup instead of being read as a window
+         * that already elapsed (Global Rule 11).
+         */
+        @NotNull
+        private Duration duration = Duration.ZERO;
 
         public int getVehicleCount() {
             return vehicleCount;
@@ -157,6 +181,24 @@ public class GeneratorProperties {
 
         public void setTargetEventsPerSecond(int targetEventsPerSecond) {
             this.targetEventsPerSecond = targetEventsPerSecond;
+        }
+
+        public Duration getDuration() {
+            return duration;
+        }
+
+        public void setDuration(Duration duration) {
+            this.duration = duration;
+        }
+
+        /**
+         * The duration is validated as a {@link Duration} rather than as a number, because a
+         * {@code @Min} constraint has no validator for it: this is the constraint that makes a
+         * negative window fail the startup instead of publishing nothing without saying so.
+         */
+        @AssertTrue(message = "coobi.generator.load-test.duration must be zero or positive")
+        public boolean isDurationNotNegative() {
+            return duration == null || !duration.isNegative();
         }
     }
 

@@ -1,0 +1,20 @@
+{
+  "command": "C:\\Python314\\python.exe infrastructure/benchmarks/benchmark.py --matrix --startup-timeout 25m",
+  "startedUtc": "2026-09-21T16:01:17Z",
+  "scenarios": [
+    "1000-1000-5m",
+    "5000-10000-5m",
+    "10000-25000-5m",
+    "20000-50000-5m"
+  ],
+  "sampleIntervalSeconds": 10.0,
+  "startupAllowanceSeconds": 180.0,
+  "volumesReset": false,
+  "frontend": false,
+  "imagesBuilt": true,
+  "composeFiles": [
+    "compose.yml",
+    "infrastructure/benchmarks/compose.benchmark.yml"
+  ],
+  "prometheusUrl": "http://127.0.0.1:9090"
+}

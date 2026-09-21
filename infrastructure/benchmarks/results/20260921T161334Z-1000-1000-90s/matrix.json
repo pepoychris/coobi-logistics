@@ -1,0 +1,422 @@
+[
+  {
+    "scenario": {
+      "vehicles": 1000,
+      "targetEventsPerSecond": 1000,
+      "durationSeconds": 90.0,
+      "duration": "90s",
+      "name": "1000-1000-90s"
+    },
+    "windowSeconds": 90.08599996566772,
+    "environment": {
+      "host": {
+        "platform": "Windows-10-10.0.19045-SP0",
+        "system": "Windows",
+        "release": "10",
+        "machine": "AMD64",
+        "processor": "Intel64 Family 6 Model 141 Stepping 1, GenuineIntel",
+        "cpuModel": "11th Gen Intel(R) Core(TM) i7-11800H @ 2.30GHz",
+        "cpuCount": 16,
+        "memoryBytes": 34115739648
+      },
+      "docker": {
+        "serverVersion": "29.8.0",
+        "composeVersion": "5.5.1",
+        "operatingSystem": "Docker Desktop",
+        "kernelVersion": "6.18.33.2-microsoft-standard-WSL2",
+        "cpus": 16,
+        "memoryBytes": 16644730880
+      },
+      "repository": {
+        "commit": "a82c3043b760117d5c1c0a00a11eb9f9c25b5b3e",
+        "dirty": true
+      },
+      "images": {
+        "kafka": "apache/kafka:4.3.1",
+        "postgres": "postgres:18.6",
+        "prometheus": "prom/prometheus:v3.14.0-busybox",
+        "event-generator": {
+          "buildStages": [
+            "maven:3.9.9-eclipse-temurin-21-alpine",
+            "eclipse-temurin:21-jre-alpine"
+          ]
+        },
+        "stream-processor": {
+          "buildStages": [
+            "maven:3.9.9-eclipse-temurin-21-alpine",
+            "eclipse-temurin:21-jre-alpine"
+          ]
+        },
+        "logistics-api": {
+          "buildStages": [
+            "maven:3.9.9-eclipse-temurin-21-alpine",
+            "eclipse-temurin:21-jre-alpine"
+          ]
+        },
+        "frontend": {
+          "buildStages": [
+            "node:24-alpine",
+            "nginxinc/nginx-unprivileged:1.30.5-alpine"
+          ]
+        }
+      },
+      "java": {
+        "event-generator": {
+          "status": "measured",
+          "version": "21.0.12",
+          "maxHeap": "3.88G"
+        },
+        "stream-processor": {
+          "status": "measured",
+          "version": "21.0.12",
+          "maxHeap": "3.88G"
+        },
+        "logistics-api": {
+          "status": "measured",
+          "version": "21.0.12",
+          "maxHeap": "3.88G"
+        }
+      },
+      "kafka": {
+        "locationTopic": {
+          "status": "measured",
+          "partitionCount": 6,
+          "replicationFactor": 1
+        }
+      },
+      "prometheus": {
+        "scrapeIntervalSeconds": 15.0
+      },
+      "benchmarkServices": [
+        "kafka",
+        "postgres",
+        "prometheus",
+        "event-generator",
+        "stream-processor",
+        "logistics-api"
+      ]
+    },
+    "quantities": [
+      {
+        "metric": "Events produced",
+        "unit": "events/s",
+        "value": 998.7224339857785,
+        "status": "measured",
+        "source": "prometheus: coobi_generator_events_total{result=\"published\"} over the window",
+        "note": "target 1,000 events/s"
+      },
+      {
+        "metric": "Events produced, total",
+        "unit": "events",
+        "value": 89900.0,
+        "status": "measured",
+        "source": "prometheus: coobi_generator_events_total{result=\"published\"} first to last sample",
+        "note": ""
+      },
+      {
+        "metric": "Share of the target sustained",
+        "unit": "%",
+        "value": 99.87224339857785,
+        "status": "measured",
+        "source": "computed from the produced rate and the target of the scenario",
+        "note": ""
+      },
+      {
+        "metric": "Events received",
+        "unit": "events/s",
+        "value": 1117.4124625642094,
+        "status": "measured",
+        "source": "prometheus: logistics_events_received_total over the window",
+        "note": ""
+      },
+      {
+        "metric": "Events received, total",
+        "unit": "events",
+        "value": 100585.0,
+        "status": "measured",
+        "source": "prometheus: logistics_events_received_total first to last sample",
+        "note": ""
+      },
+      {
+        "metric": "Events processed",
+        "unit": "events/s",
+        "value": 1117.4124596046033,
+        "status": "measured",
+        "source": "prometheus: logistics_events_processed_total over the window",
+        "note": ""
+      },
+      {
+        "metric": "Events processed, total",
+        "unit": "events",
+        "value": 100585.0,
+        "status": "measured",
+        "source": "prometheus: logistics_events_processed_total first to last sample",
+        "note": ""
+      },
+      {
+        "metric": "Events failed",
+        "unit": "events/s",
+        "value": 0.0,
+        "status": "measured",
+        "source": "prometheus: logistics_events_failed_total over the window",
+        "note": ""
+      },
+      {
+        "metric": "Events failed, total",
+        "unit": "events",
+        "value": 0.0,
+        "status": "measured",
+        "source": "prometheus: logistics_events_failed_total first to last sample",
+        "note": ""
+      },
+      {
+        "metric": "Alerts generated",
+        "unit": "alerts",
+        "value": 0.0,
+        "status": "measured",
+        "source": "prometheus: logistics_alerts_generated_total by type, first to last sample",
+        "note": "SPEEDING plus VEHICLE_STOPPED"
+      },
+      {
+        "metric": "Consumer lag, peak of the streams client metric",
+        "unit": "records",
+        "value": 2719740.0,
+        "status": "measured",
+        "source": "prometheus: kafka_consumer_fetch_manager_records_lag_max, highest sample",
+        "note": "per partition of the consumed topic, summed; the binder publishes it only while the streams are behind, so samples without it are not a lag of zero"
+      },
+      {
+        "metric": "Consumer lag, broker group total",
+        "unit": "records",
+        "value": 2858851,
+        "status": "measured",
+        "source": "kafka-consumer-groups.sh --describe, committed offset against the end of the log",
+        "note": "the highest partition of the group was 502558 records behind, over 6 partitions, at the end of the window"
+      },
+      {
+        "metric": "Processing latency p50",
+        "unit": "ms",
+        "value": 0.041164602204518175,
+        "status": "measured",
+        "source": "prometheus: histogram_quantile over the window",
+        "note": "one processing step of the topology, not the end-to-end age of an event"
+      },
+      {
+        "metric": "Processing latency p95",
+        "unit": "ms",
+        "value": 1.386660796501927,
+        "status": "measured",
+        "source": "prometheus: histogram_quantile over the window",
+        "note": "one processing step of the topology, not the end-to-end age of an event"
+      },
+      {
+        "metric": "Processing latency p99",
+        "unit": "ms",
+        "value": 1.8099091617571872,
+        "status": "measured",
+        "source": "prometheus: histogram_quantile over the window",
+        "note": "one processing step of the topology, not the end-to-end age of an event"
+      },
+      {
+        "metric": "Processing latency, mean",
+        "unit": "ms",
+        "value": 0.41868253156389496,
+        "status": "measured",
+        "source": "prometheus: change of the timer total over the change of its count",
+        "note": ""
+      },
+      {
+        "metric": "Processing latency, longest step",
+        "unit": "ms",
+        "value": 91.139939,
+        "status": "measured",
+        "source": "prometheus: logistics_event_processing_duration_seconds_max, highest sample",
+        "note": ""
+      },
+      {
+        "metric": "CPU of event-generator, mean",
+        "unit": "% of one core",
+        "value": 3.4022222222222225,
+        "status": "measured",
+        "source": "docker stats, averaged over the samples of the window",
+        "note": "100% is one fully used core, a container may exceed it"
+      },
+      {
+        "metric": "CPU of event-generator, p95",
+        "unit": "% of one core",
+        "value": 5.176,
+        "status": "measured",
+        "source": "docker stats, p95 across the samples of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU of event-generator, peak",
+        "unit": "% of one core",
+        "value": 5.86,
+        "status": "measured",
+        "source": "docker stats, highest sample",
+        "note": ""
+      },
+      {
+        "metric": "Memory of event-generator, peak",
+        "unit": "MiB",
+        "value": 263.3,
+        "status": "measured",
+        "source": "docker stats, highest resident memory of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU of stream-processor, mean",
+        "unit": "% of one core",
+        "value": 81.73,
+        "status": "measured",
+        "source": "docker stats, averaged over the samples of the window",
+        "note": "100% is one fully used core, a container may exceed it"
+      },
+      {
+        "metric": "CPU of stream-processor, p95",
+        "unit": "% of one core",
+        "value": 215.10599999999997,
+        "status": "measured",
+        "source": "docker stats, p95 across the samples of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU of stream-processor, peak",
+        "unit": "% of one core",
+        "value": 255.87,
+        "status": "measured",
+        "source": "docker stats, highest sample",
+        "note": ""
+      },
+      {
+        "metric": "Memory of stream-processor, peak",
+        "unit": "MiB",
+        "value": 692.8,
+        "status": "measured",
+        "source": "docker stats, highest resident memory of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU of logistics-api, mean",
+        "unit": "% of one core",
+        "value": 1.4477777777777776,
+        "status": "measured",
+        "source": "docker stats, averaged over the samples of the window",
+        "note": "100% is one fully used core, a container may exceed it"
+      },
+      {
+        "metric": "CPU of logistics-api, p95",
+        "unit": "% of one core",
+        "value": 4.571999999999999,
+        "status": "measured",
+        "source": "docker stats, p95 across the samples of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU of logistics-api, peak",
+        "unit": "% of one core",
+        "value": 5.06,
+        "status": "measured",
+        "source": "docker stats, highest sample",
+        "note": ""
+      },
+      {
+        "metric": "Memory of logistics-api, peak",
+        "unit": "MiB",
+        "value": 309.8,
+        "status": "measured",
+        "source": "docker stats, highest resident memory of the window",
+        "note": ""
+      },
+      {
+        "metric": "CPU, highest container",
+        "unit": "% of one core",
+        "value": 255.87,
+        "status": "measured",
+        "source": "docker stats, highest sample of any container of the run",
+        "note": "container stream-processor"
+      },
+      {
+        "metric": "Memory, highest container",
+        "unit": "MiB",
+        "value": 692.8,
+        "status": "measured",
+        "source": "docker stats, highest resident memory of any container of the run",
+        "note": "container stream-processor"
+      }
+    ],
+    "observations": [
+      {
+        "observation": "the pipeline invariant received = processed + failed",
+        "measured": "100585 vs 100585 + 0",
+        "held": true,
+        "source": "logistics_events_{received,processed,failed}_total in the samples"
+      },
+      {
+        "observation": "processing steps per accepted record",
+        "measured": "3.000",
+        "expected": "3 (validation plus two detections), as docs/observability.md states",
+        "source": "logistics_event_processing_duration_seconds_count / processed events"
+      },
+      {
+        "observation": "the target rate was sustained",
+        "measured": "998.7 events/s of 1,000",
+        "held": true,
+        "source": "coobi_generator_events_total{result=\"published\"} over the window"
+      },
+      {
+        "observation": "the generator was still publishing at the end of the window",
+        "measured": "latest rate 1061.8 events/s",
+        "held": true,
+        "source": "the samples before the last one"
+      },
+      {
+        "observation": "every series the summary needs answered in every sample",
+        "measured": "9 of 9 samples complete",
+        "held": true,
+        "source": "the raw samples of raw.jsonl"
+      },
+      {
+        "observation": "the measured window has the duration of the scenario",
+        "measured": "90.1s of 90s",
+        "held": true,
+        "source": "wall clock of the harness between the first and the last sample"
+      }
+    ],
+    "latencySource": {
+      "histogram": true,
+      "gauge": false,
+      "status": "measured"
+    },
+    "run": {
+      "directory": "infrastructure/benchmarks/results/20260921T161334Z-1000-1000-90s/1000-1000-90s",
+      "startedUtc": "2026-09-21T16:14:29Z",
+      "finishedUtc": "2026-09-21T16:15:59Z",
+      "sampleCount": 9,
+      "sampleIntervalSeconds": 10.0,
+      "loadTestDurationSeconds": 270.0,
+      "health": {
+        "kafka": "healthy",
+        "postgres": "healthy",
+        "prometheus": "healthy",
+        "event-generator": "healthy",
+        "stream-processor": "healthy",
+        "logistics-api": "healthy"
+      },
+      "targets": {
+        "event-generator": "up",
+        "prometheus": "up",
+        "stream-processor": "up"
+      },
+      "volumesReset": false,
+      "frontend": false,
+      "composeCommand": "docker compose -f compose.yml -f infrastructure/benchmarks/compose.benchmark.yml up -d kafka postgres prometheus event-generator stream-processor logistics-api",
+      "composeEnvironment": {
+        "BENCH_VEHICLES": "1000",
+        "BENCH_TARGET_EVENTS_PER_SECOND": "1000",
+        "BENCH_LOAD_TEST_DURATION": "270s"
+      }
+    }
+  }
+]

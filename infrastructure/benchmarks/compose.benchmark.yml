@@ -1,0 +1,53 @@
+# Coobi Logistics - benchmark overlay (MVP-11.1).
+#
+# It is applied *on top of* the stack of `compose.yml`, and it is the only thing a benchmark
+# changes about the stack:
+#
+#   docker compose -f compose.yml -f infrastructure/benchmarks/compose.benchmark.yml up -d ...
+#
+# The harness of this directory builds that command line itself, so a benchmark is one command:
+#
+#   python infrastructure/benchmarks/benchmark.py --scenario 5000/10000/5m
+#
+# Three things differ from a demonstration run, and nothing else does:
+#
+# 1. the generator runs the load-test profile at the fleet and the rate of the scenario. The
+#    values are interpolated from the environment of the invoking process, so the harness sets
+#    `BENCH_VEHICLES`, `BENCH_TARGET_EVENTS_PER_SECOND` and `BENCH_LOAD_TEST_DURATION` per
+#    scenario, and Compose aborts before it creates a container when one of them is missing.
+#    The duration is the bound of the run: the generator stops publishing when it elapses and
+#    stays up, so a benchmark that dies leaves no load behind.
+# 2. the stream processor runs the `benchmark` Spring profile, which adds the quantile gauges
+#    and the cumulative histogram of the processing timer that `docs/benchmarks.md` reports.
+#    The default profile is untouched, so a demonstration stack publishes neither of them.
+# 3. the dashboard is put behind a profile, so it is not part of a benchmark unless somebody
+#    asks for it with `--profile frontend`. The measurement is of the pipeline, and a browser
+#    that draws the fleet every second is load of its own.
+#
+# The pipeline services, their ports, their health checks and their dependencies are the ones
+# of `compose.yml` and are not overridden here.
+
+services:
+  event-generator:
+    environment:
+      # The load-test profile of MVP-11.1. `GENERATOR_PUBLISH_ENABLED` is stated as well, so a
+      # `.env` that turned publishing off cannot silently turn a benchmark into a measurement of
+      # nothing.
+      GENERATOR_MODE: LOAD_TEST
+      GENERATOR_PUBLISH_ENABLED: "true"
+      LOAD_TEST_VEHICLE_COUNT: ${BENCH_VEHICLES:?BENCH_VEHICLES must be set by the benchmark harness}
+      LOAD_TEST_TARGET_EVENTS_PER_SECOND: ${BENCH_TARGET_EVENTS_PER_SECOND:?BENCH_TARGET_EVENTS_PER_SECOND must be set by the benchmark harness}
+      LOAD_TEST_DURATION: ${BENCH_LOAD_TEST_DURATION:?BENCH_LOAD_TEST_DURATION must be set by the benchmark harness}
+
+  stream-processor:
+    environment:
+      # The latency distribution of the processing steps (MVP-11.1). See
+      # `services/stream-processor/src/main/resources/application-benchmark.yml`.
+      SPRING_PROFILES_ACTIVE: benchmark
+
+  frontend:
+    # In a benchmark the dashboard only runs when it is asked for by name. The harness leaves it
+    # out of the measured run, which is what "minimise irrelevant frontend influence" means in
+    # practice: the container is not started at all.
+    profiles:
+      - frontend

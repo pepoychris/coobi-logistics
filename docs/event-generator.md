@@ -51,6 +51,7 @@ contract and are kept in sync with `.env.example` and README.md.
 | `COOBI_KAFKA_INITIALIZATION_ENABLED` | Provision the Kafka topics on startup; `false` runs the service without a broker | `true` | boolean |
 | `LOAD_TEST_VEHICLE_COUNT` | Simulated vehicles used by `LOAD_TEST` | `5000` | vehicles (count) |
 | `LOAD_TEST_TARGET_EVENTS_PER_SECOND` | Publication rate used by `LOAD_TEST` | `20000` | events per second |
+| `LOAD_TEST_DURATION` | How long `LOAD_TEST` publishes before the generator stops on its own (`0` means no bound) | `0` | duration (`5m`, `90s`) or seconds |
 | `GENERATOR_RANDOM_SEED` | Seed of the deterministic trajectory generator | `20260101` | long |
 
 Every other setting lives in
@@ -77,6 +78,27 @@ $env:LOAD_TEST_TARGET_EVENTS_PER_SECOND="50000"
 `GENERATOR_PUBLISH_ENABLED=false` starts the service and its endpoints without producing
 events, but it does not remove the broker requirement: the topics are still provisioned
 and the Kafka health indicator still checks the broker.
+
+### Bounding a load test
+
+`LOAD_TEST_DURATION` bounds the run of a load test (MVP-11.1). When the window elapses the
+publishing task cancels itself, the producer is drained the same way a shutdown drains it, and
+the service stays up with its health and metrics endpoints answering - so a benchmark stops the
+load without taking the pipeline down with it:
+
+```powershell
+$env:GENERATOR_MODE="LOAD_TEST"
+$env:LOAD_TEST_VEHICLE_COUNT="10000"
+$env:LOAD_TEST_TARGET_EVENTS_PER_SECOND="25000"
+$env:LOAD_TEST_DURATION="5m"
+.\services\event-generator\mvnw.cmd -f services/event-generator/pom.xml spring-boot:run
+```
+
+The window is measured from the first tick, not from the moment the context was built, and the
+log line `telemetry publishing window elapsed` states the published and failed totals of the
+run. The value is validated at startup: a negative window aborts the startup instead of
+becoming a run that publishes nothing. It belongs to the load-test profile, so a `NORMAL` run
+publishes until it is stopped however the value is set.
 
 ### Running without a broker
 
