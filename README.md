@@ -16,7 +16,7 @@ stream processing and sustained high-throughput ingestion.
 
 ## Current Status
 
-**MVP-4 - Derived state persisted in PostgreSQL.**
+**MVP-5 - Logistics REST API.**
 
 The repository foundation is in place (MVP-0.1), the environment contract is defined
 (MVP-0.3): the complete set of environment variables, their safe development defaults
@@ -38,8 +38,14 @@ persists that derived state in PostgreSQL - one row per vehicle plus one row per
 alert, created by Flyway migrations and written idempotently.
 See [docs/stream-processor.md](docs/stream-processor.md).
 
-The REST API and the frontend arrive in the following milestones, which are tracked in the
-implementation roadmap as milestones and issues.
+The REST API is implemented (MVP-5): `services/logistics-api` is a Spring Boot service that
+answers the operator views - the fleet, the alerts and the live statistics - over
+`/api/v1`, reading the state the processor derived and reporting a value whose source cannot
+be read as absent instead of inventing it.
+See [docs/logistics-api.md](docs/logistics-api.md).
+
+The frontend arrives in the following milestone, which is tracked in the implementation
+roadmap as milestones and issues.
 
 ## Configuration
 
@@ -82,6 +88,7 @@ listener defined by `compose.yml` (see Local Infrastructure below).
 | `SPEED_LIMIT` | Speed above which a vehicle is reported as speeding | `120` | kilometres per hour (km/h) |
 | `STOPPED_WINDOW_SECONDS` | Time a vehicle must stay effectively stationary before it is reported as stopped | `300` | seconds |
 | `MOVEMENT_THRESHOLD_METERS` | Total distance below which movement counts as "no movement" over the stopped window | `50` | metres |
+| `STREAM_PROCESSOR_METRICS_URL` | Actuator metrics endpoint of the stream processor, read by `GET /api/v1/statistics` | `http://localhost:8081/actuator/metrics` | URL |
 
 Each service reads these variables from its own environment, and a value already
 present in that environment wins over any fallback baked into the service. `compose.yml`
@@ -279,6 +286,50 @@ duplicate a row. Telemetry itself is never persisted.
 Read [docs/stream-processor.md](docs/stream-processor.md) for the complete configuration
 contract, the validation rules, the alert contract and the troubleshooting table.
 
+## Logistics REST API
+
+`services/logistics-api` is the read side of the stack. It answers the operator views from
+the state the processor has already persisted, and it writes nothing: it maps the tables of
+MVP-4, it owns no migration and its connection pool is read-only. It ships a Maven wrapper
+and needs only the PostgreSQL of the local stack:
+
+```powershell
+docker compose up -d
+# the schema belongs to the processor migrations (MVP-4): run it once, or apply them yourself
+.\services\stream-processor\mvnw.cmd -f services/stream-processor/pom.xml spring-boot:run
+.\services\logistics-api\mvnw.cmd -f services/logistics-api/pom.xml spring-boot:run
+```
+
+```bash
+docker compose up -d
+./services/stream-processor/mvnw -f services/stream-processor/pom.xml spring-boot:run
+./services/logistics-api/mvnw -f services/logistics-api/pom.xml spring-boot:run
+```
+
+| Item | Value |
+| --- | --- |
+| Base path | `/api/v1` |
+| Endpoints | `GET /api/v1/vehicles`, `GET /api/v1/vehicles/{vehicleId}`, `GET /api/v1/alerts`, `GET /api/v1/alerts/{id}`, `GET /api/v1/statistics` |
+| Vehicles | One page of the fleet, newest telemetry first, optionally filtered by `status`; an unknown vehicle is a `404` |
+| Alerts | One page of alerts, newest first, filtered independently by `vehicleId`, `type` and `severity`; an unknown alert is a `404` |
+| Paging | `page` from `0`, `size` between `1` and `100`; the order of a page is fixed by the endpoint so paging is stable |
+| Statistics | `processedEvents` and `eventsPerSecond` from the Kafka Streams counters of the processor, `activeVehicles` and `alertsGenerated` counted in the database, `uptimeSeconds` of this instance - a source that cannot be read is reported as `null` |
+| Persistence | Reads `vehicles`, `vehicle_latest_state` and `alerts`; creates nothing and writes nothing |
+| Database | `POSTGRES_DB`, `POSTGRES_USER` and `POSTGRES_PASSWORD` of the local stack, or the standard `SPRING_DATASOURCE_*` overrides |
+| Errors | RFC 9457 problem details: `400` for a parameter the client can correct, `404` for an unknown resource, `500` without internals |
+| Health | `GET http://localhost:8082/actuator/health` |
+| Tests | `.\services\logistics-api\mvnw.cmd -f services/logistics-api/pom.xml test` |
+
+The field names and units of a vehicle are the ones of the version-1 location contract the
+services share, and the metadata of an alert is the `AlertData` of the alert contract,
+embedded as JSON. Responses are DTOs, so the storage mapping can change without changing the
+contract, and `SchemaContractTest` pins those DTOs to the schema: it reads the migrations of
+the stream processor and fails when the columns of the entities and the columns of the
+migrations drift apart.
+
+Read [docs/logistics-api.md](docs/logistics-api.md) for the complete configuration contract,
+the response of every endpoint, the source of every statistic and the troubleshooting table.
+
 ## Repository Layout
 
 ```text
@@ -298,11 +349,13 @@ coobi-logistics/
 └── README.md
 ```
 
-`services/event-generator` holds the MVP-1 implementation and `services/stream-processor`
-the MVP-2 and MVP-3 implementation, each with its own Maven wrapper and its service documentation
+`services/event-generator` holds the MVP-1 implementation, `services/stream-processor` the
+MVP-2 to MVP-4 implementation and `services/logistics-api` the MVP-5 implementation, each with
+its own Maven wrapper and its service documentation
 ([docs/event-generator.md](docs/event-generator.md),
-[docs/stream-processor.md](docs/stream-processor.md)). The `logistics-api`, `frontend` and
-`infrastructure` directories are intentionally empty placeholders at this stage.
+[docs/stream-processor.md](docs/stream-processor.md),
+[docs/logistics-api.md](docs/logistics-api.md)). The `frontend` and `infrastructure`
+directories are intentionally empty placeholders at this stage.
 
 ## Technology Stack
 
