@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="Coobi Logistics">
+  <rect width="32" height="32" rx="7" fill="#0b0e0d"/>
+  <rect x="0.75" y="0.75" width="30.5" height="30.5" rx="6.25" fill="none" stroke="#313b38" stroke-width="1.5"/>
+  <path d="M6 19.5h12.5v-9h4.8l2.7 3.1v5.9h-2.6" fill="none" stroke="#ffb454" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+  <circle cx="11" cy="22" r="2.4" fill="#4ade80"/>
+  <circle cx="22.2" cy="22" r="2.4" fill="#ff7a5c"/>
+</svg>

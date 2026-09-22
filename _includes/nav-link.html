@@ -1,0 +1,6 @@
+{%- assign nav_href = include.href | relative_url -%}
+{%- if page.url == include.href -%}
+<a class="nav__link is-active" href="{{ nav_href }}" aria-current="page">{{ include.label }}</a>
+{%- else -%}
+<a class="nav__link" href="{{ nav_href }}">{{ include.label }}</a>
+{%- endif -%}

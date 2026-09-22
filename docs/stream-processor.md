@@ -1,4 +1,10 @@
-# Stream processor (MVP-2 and MVP-3)
+---
+layout: page
+title: "Stream processor"
+description: "Stateful Kafka Streams topology, per-vehicle state, alerts and persistence."
+---
+
+# Stream processor
 
 The `stream-processor` service consumes the telemetry published by the event generator,
 validates it and turns relevant conditions into alerts:
@@ -65,7 +71,7 @@ file configures the stack and this service. The `SPRING_DATASOURCE_*` names are 
 Spring overrides and win over them.
 
 Every other setting lives in
-[`application.yml`](../services/stream-processor/src/main/resources/application.yml) and can
+[`application.yml`](https://github.com/pepoychris/coobi-logistics/blob/develop/services/stream-processor/src/main/resources/application.yml) and can
 still be overridden with Spring's relaxed binding, for example
 `COOBI_KAFKA_TOPICS_ALERT=logistics.alert.test.v1`, `COOBI_KAFKA_TOPICS_PARTITIONS=12` or
 `SPRING_KAFKA_STREAMS_AUTO_STARTUP=false`.
@@ -104,7 +110,7 @@ Nothing is thrown, so a malformed record can never stop the records behind it:
 | Blank or mismatched Kafka key | `record key must match the event vehicleId: key=..., vehicleId=...` |
 
 `vehicleId` is validated both in the payload and as the Kafka key, because every
-vehicle-specific event is keyed by it (Global Rule 15).
+vehicle-specific event is keyed by it.
 
 Rejected records are published to the dead letter topic with the payload exactly as it was
 consumed:
@@ -137,12 +143,12 @@ produces a second one. The state lives in the store instead of the processor ins
 a restart continues from the committed state rather than re-emitting an alert for a
 crossing that was already reported.
 
-## Vehicle state (MVP-3.1)
+## Vehicle state
 
 Every accepted record is also written to the `vehicle-state-store`, another keyed Kafka
 Streams state store with a changelog, keyed by `vehicleId`. It holds the latest state of the
-vehicle, which is what the stopped-vehicle detection below decides on, and what a later
-milestone can read to draw the fleet without replaying the topic:
+vehicle, which is what the stopped-vehicle detection below decides on, and what a reader can
+query to draw the fleet without replaying the topic:
 
 ```json
 {
@@ -167,7 +173,7 @@ and never a mixture of an older and a newer one. The store is persistent and log
 default, so a restart restores it from its changelog instead of reopening every window at
 zero.
 
-## Stopped-vehicle detection (MVP-3.2)
+## Stopped-vehicle detection
 
 A vehicle is reported as stopped once it has stayed effectively stationary for
 `STOPPED_WINDOW_SECONDS` (300 by default). "Effectively stationary" is judged on the ground
@@ -233,11 +239,11 @@ The stopped alert therefore looks like this:
 }
 ```
 
-## Persistence (MVP-4)
+## Persistence
 
 PostgreSQL holds the state this service *derives*, never the telemetry it consumes. There is
-no table of past positions: telemetry history is a milestone non-goal, and the Kafka topic
-remains the only record of what was published.
+no table of past positions: telemetry history is deliberately not stored, and the Kafka
+topic remains the only record of what was published.
 
 | Table | Rows | Written by |
 | --- | --- | --- |
@@ -286,7 +292,7 @@ current placement.
 ### Schema
 
 The schema belongs to Flyway. The migrations under
-[`db/migration`](../services/stream-processor/src/main/resources/db/migration) are its only
+[`db/migration`](https://github.com/pepoychris/coobi-logistics/tree/develop/services/stream-processor/src/main/resources/db/migration) are its only
 definition, they run before the context is considered started, and the service declares no
 JPA entity, so no ORM can create or update a table. `spring.jpa.hibernate.ddl-auto` is set to
 `none` as a guard for the day an entity is added.
@@ -305,7 +311,7 @@ JPA entity, so no ORM can create or update a table. `spring.jpa.hibernate.ddl-au
 | Recovery | `DEBUG` log line when a vehicle returns below the limit |
 | Persistence | `DEBUG` log line when a duplicate alert is ignored; `WARN` when a concurrent writer forces a retry of a vehicle upsert |
 
-### Metrics (MVP-8)
+### Metrics
 
 The service publishes five meters that describe what the topology consumes and produces, and
 the Kafka metrics of the streams themselves:

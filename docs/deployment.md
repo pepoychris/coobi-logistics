@@ -1,8 +1,14 @@
-# Single-command local deployment (MVP-10)
+---
+layout: page
+title: "Single-command local deployment"
+description: "What docker compose up --build starts, and how to verify a running stack."
+---
+
+# Single-command local deployment
 
 This document is the deployment contract of the repository: what `docker compose up --build`
 starts, what each image contains, which health check gates which dependency, and how to verify
-a running stack. The milestone it describes is MVP-10 of the roadmap.
+a running stack.
 
 ## The command
 
@@ -19,8 +25,8 @@ docker compose up --build
 ```
 
 That is the whole setup. Nothing but Docker is installed on the machine: no JDK, no Maven, no
-Node, no Kafka and no PostgreSQL (Global Rule 18). Every compilation happens inside a build
-stage of an image, and every service is started by Compose.
+Node, no Kafka and no PostgreSQL. Every compilation happens inside a build stage of an image,
+and every service is started by Compose.
 
 | Item | Value |
 | --- | --- |
@@ -38,7 +44,8 @@ form (`path` and `required`), which is what lets the stack start with or without
 
 ## What the stack starts
 
-Seven services, of which the two of MVP-0.2 stay exactly as they were:
+Seven services, of which `kafka` and `postgres` are the two infrastructure images the
+application services build on:
 
 | Service | Built from | Published on | Health check | Waits for |
 | --- | --- | --- | --- | --- |
@@ -51,7 +58,7 @@ Seven services, of which the two of MVP-0.2 stay exactly as they were:
 | `prometheus` | `prom/prometheus:v3.14.0-busybox` | `127.0.0.1:9090` | `GET /-/healthy` | - |
 
 Every published port is bound to the loopback interface, so the stack is reachable from this
-machine only (Global Rule 8). The same services are reachable from each other by name
+machine only. The same services are reachable from each other by name
 (`kafka:29092`, `postgres:5432`, `stream-processor:8081`) on the network Compose creates.
 
 The dashboard is published on the port the development server of the frontend uses, so the URL
@@ -59,7 +66,7 @@ a reader opens is the same with and without Node installed. Running `npm run dev
 container needs the container stopped first (`docker compose stop frontend`), because both want
 that port.
 
-## The images (MVP-10.1)
+## The images
 
 Each application ships a Dockerfile next to its own sources, and its build context is its own
 directory. The three Maven services are self-contained Maven projects with their own wrapper,
@@ -118,7 +125,7 @@ Two properties of that proxy are deliberate:
   `/api/v1/stream/statistics` are Server-Sent Events that stay open for as long as a browser is
   connected.
 
-## Health and startup order (MVP-10.3)
+## Health and startup order
 
 The stack does not depend on the order in which containers happen to start. Every dependency is
 expressed as a condition on a health check, and each health check asks the thing itself rather
@@ -188,7 +195,7 @@ The values that differ inside the network are not interpolated from `.env` but s
 | `API_PROXY_TARGET` | `http://logistics-api:8082` | the origin the dashboard proxies `/api` to |
 
 The one variable of the deployment itself is documented in `.env.example` and in
-[README.md](../README.md):
+[README.md](https://github.com/pepoychris/coobi-logistics/blob/develop/README.md):
 
 | Variable | Default | Scope |
 | --- | --- | --- |
@@ -198,10 +205,10 @@ The scrape targets are not variables. They are the service names of this stack, 
 `infrastructure/prometheus/prometheus.yml`, because Prometheus expands `${VAR}` references of
 its configuration file in `external_labels` and nowhere else: a variable in a
 `static_configs.targets` entry is scraped as its own name. That is what the single
-`PROMETHEUS_HOST` of MVP-8 did - it was read by the container, it was never expanded, and both
-targets stayed `down`. To scrape a service somebody started from the host instead of the
-container, change the one target in that file to `host.docker.internal:8080` or `:8081`;
-`compose.yml` maps that name on a Linux engine as well.
+`PROMETHEUS_HOST` this repository used to ship did - it was read by the container, it was never
+expanded, and both targets stayed `down`. To scrape a service somebody started from the host
+instead of the container, change the one target in that file to `host.docker.internal:8080`
+or `:8081`; `compose.yml` maps that name on a Linux engine as well.
 
 One thing a container does not inherit is a host-only override of a service. Setting
 `SPRING_DATASOURCE_URL` in `.env` changes where a service run from the host connects, and it is
@@ -255,8 +262,8 @@ are `up` within one scrape interval of the stack being healthy.
 
 ## Running a service from the host instead
 
-The containerized stack does not remove the workflow the earlier milestones documented. To work
-on a service in the IDE, start the infrastructure and leave that one service out:
+The containerized stack does not remove the workflow of running a service from the host. To
+work on a service in the IDE, start the infrastructure and leave that one service out:
 
 ```bash
 docker compose up -d kafka postgres prometheus
@@ -278,5 +285,5 @@ stack are what a host-run service replaces when it takes over one of them.
 | The dashboard is on `5173` and `npm run dev` cannot bind | Both want the same port. `docker compose stop frontend` to use the development server |
 | A scrape target is `down` in Prometheus | The service it names is not running, or its target was changed in `infrastructure/prometheus/prometheus.yml`. The two shipped targets are the service names of the stack |
 | A service cannot authenticate against PostgreSQL after the password in `.env` changed | The `postgres` image applies `POSTGRES_PASSWORD` when it *initializes* the volume and never again, so a volume created with an older password keeps it - the log says `Skipping initialization`. Either put the old password back in `.env`, or start from a fresh database: `docker compose down -v` deletes the local volumes of the stack |
-| Port `5432`, `9092`, `9090`, `8080`, `8081`, `8082` or `5173` is already in use | Another stack is running - possibly the MVP-0.2 one - or a service is running from the host. `docker compose down` the other stack, or stop whatever holds the port; `docker compose ps` lists the containers of this one |
+| Port `5432`, `9092`, `9090`, `8080`, `8081`, `8082` or `5173` is already in use | Another stack is running, or a service is running from the host. `docker compose down` the other stack, or stop whatever holds the port; `docker compose ps` lists the containers of this one |
 | An image build fails while resolving Maven or npm dependencies | The build needs network access to the registries. Re-run it, or start from `docker compose build <service>` to see the failing step alone |

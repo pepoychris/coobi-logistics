@@ -1,3 +1,9 @@
+---
+layout: page
+title: "Event contracts in one minute"
+description: "Topics, keys, payloads and the dead-letter envelope of the telemetry pipeline."
+---
+
 # Event contracts in one minute
 
 All topics use six partitions and replication factor one in the local stack. Keys are strings and timestamps are UTC ISO-8601 instants.

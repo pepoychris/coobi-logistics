@@ -82,6 +82,11 @@ coverage/
 logs/
 *.pid
 
+# Jekyll / GitHub Pages build output
+_site/
+.jekyll-cache/
+.jekyll-metadata
+
 # OS noise
 .DS_Store
 Thumbs.db

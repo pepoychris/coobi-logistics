@@ -1,0 +1,40 @@
+<nav class="sidebar" aria-label="Documentation">
+  <div class="nav">
+    <div class="nav__group">
+      <p class="nav__label" id="nav-start">Start here</p>
+      <div class="nav__items" aria-labelledby="nav-start">
+        {% include nav-link.html href="/" label="Overview" %}
+        {% include nav-link.html href="/docs/architecture.html" label="Architecture" %}
+        {% include nav-link.html href="/docs/events.html" label="Event contracts" %}
+      </div>
+    </div>
+
+    <div class="nav__group">
+      <p class="nav__label" id="nav-services">Services</p>
+      <div class="nav__items" aria-labelledby="nav-services">
+        {% include nav-link.html href="/docs/event-generator.html" label="Event generator" %}
+        {% include nav-link.html href="/docs/stream-processor.html" label="Stream processor" %}
+        {% include nav-link.html href="/docs/logistics-api.html" label="Logistics API" %}
+        {% include nav-link.html href="/docs/frontend.html" label="Fleet console" %}
+      </div>
+    </div>
+
+    <div class="nav__group">
+      <p class="nav__label" id="nav-operations">Operations</p>
+      <div class="nav__items" aria-labelledby="nav-operations">
+        {% include nav-link.html href="/docs/deployment.html" label="Local deployment" %}
+        {% include nav-link.html href="/docs/observability.html" label="Observability" %}
+        {% include nav-link.html href="/docs/benchmarks.html" label="Benchmarks" %}
+        {% include nav-link.html href="/docs/testing-reliability.html" label="Testing" %}
+      </div>
+    </div>
+
+    <div class="nav__group">
+      <p class="nav__label" id="nav-repository">Repository</p>
+      <div class="nav__items" aria-labelledby="nav-repository">
+        {% include nav-link.html href="/docs/agent-orchestration.html" label="Agent workflow" %}
+        <a class="nav__link" href="https://github.com/pepoychris/coobi-logistics">Source code</a>
+      </div>
+    </div>
+  </div>
+</nav>

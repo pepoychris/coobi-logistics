@@ -1,0 +1,61 @@
+# Coobi Logistics - documentation site served by GitHub Pages.
+#
+# GitHub Pages builds this repository with Jekyll straight from the branch root, with no
+# extra build step: `_layouts/` renders every Markdown page, `_includes/` holds the
+# navigation, and `assets/docs/` carries the console theme plus the Mermaid bootstrap.
+#
+# `baseurl` has to match the project path of the published URL
+# (https://pepoychris.github.io/coobi-logistics/). Update it here if the repository is
+# renamed, moved to a user site or served from a custom domain.
+
+title: Coobi Logistics
+tagline: Fleet telemetry pipeline
+description: >-
+  A local, reproducible fleet telemetry pipeline: Kafka, Kafka Streams, PostgreSQL,
+  Prometheus and a Vue + Three.js console.
+
+url: "https://pepoychris.github.io"
+baseurl: "/coobi-logistics"
+
+markdown: kramdown
+kramdown:
+  input: GFM
+  hard_wrap: false
+  syntax_highlighter: rouge
+
+# GitHub Pages loads these two plugins itself; the settings are declared here so the site
+# does not depend on an implicit default and a local build behaves like the published one.
+# `plugins:` is deliberately absent: declaring that key would replace the whole default
+# plugin list of GitHub Pages instead of adding to it.
+#
+# - jekyll-relative-links rewrites the `.md` links of this repository to the `.html` pages
+#   Jekyll generates, so one link works both on GitHub Pages and on github.com.
+# - jekyll-readme-index serves README.md as the site root.
+relative_links:
+  enabled: true
+  collections: false
+
+readme_index:
+  enabled: true
+  remove_originals: false
+
+# Prose only. Sources, Compose files, the frontend bundle and the internal roadmap stay
+# in the repository and out of the served site.
+exclude:
+  - AGENTS.md
+  - "Coobi Logistics*"
+  - compose.yml
+  - pom.xml
+  - .editorconfig
+  - .env
+  - .env.example
+  - .cursor
+  - .codex
+  - .codegraph
+  - services
+  - infrastructure
+  - frontend
+  - vendor
+  - Gemfile
+  - Gemfile.lock
+  - "*.log"

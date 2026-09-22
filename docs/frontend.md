@@ -1,7 +1,13 @@
-# Coobi Logistics - Vue dashboard (MVP-7)
+---
+layout: page
+title: "Coobi Logistics - Vue dashboard"
+description: "The Vue 3 and Three.js console that renders the fleet in real time."
+---
 
-`frontend/` is the public view of the stack: a Vue 3 application that reads the REST API of
-MVP-5 and the Server-Sent Events streams of MVP-6, and shows the fleet on a map, the live
+# Coobi Logistics - Vue dashboard
+
+`frontend/` is the public view of the stack: a Vue 3 application that reads the REST API and
+the Server-Sent Events streams of the logistics API, and shows the fleet on a map, the live
 KPIs of the pipeline and the events it stores as they happen. It is a reader only - it has no
 write path, no second copy of the state and no number of its own.
 
@@ -13,7 +19,7 @@ No UI framework and no paid map provider are involved.
 In the stack there is nothing to install: `docker compose up --build` builds this dashboard into
 an nginx container that serves the bundle on <http://localhost:5173> and proxies `/api` to the
 API of the stack, so the page reaches the API of its own origin exactly as it does in
-development. That is the containerized server of MVP-10, documented in
+development. That is the containerized server described in
 [deployment.md](deployment.md).
 
 To work on the dashboard itself, Node.js 20.19 or newer and npm are the only requirements.
@@ -32,7 +38,7 @@ npm run dev
 
 The dev server listens on <http://localhost:5173> and proxies `/api` to
 `http://localhost:8082`, where the logistics API of the local stack answers. Start the stack
-as described in [README.md](../README.md) first - the dashboard is a view of it and shows a
+as described in [README.md](https://github.com/pepoychris/coobi-logistics/blob/develop/README.md) first - the dashboard is a view of it and shows a
 disconnected state, with no invented values, while the API is not there.
 
 | Command | What it does |
@@ -63,7 +69,7 @@ is the knob that moves.
 
 ### Why the default is a same-origin path
 
-The API of MVP-5 and MVP-6 ships no CORS configuration, and that is deliberate: it is a
+The logistics API ships no CORS configuration, and that is deliberate: it is a
 service that answers its own origin, not a public API for arbitrary pages. A browser that
 loaded the dashboard from `http://localhost:5173` and called `http://localhost:8082` directly
 would therefore be blocked by the browser itself, not by the service.
@@ -85,7 +91,7 @@ origin as the API needs neither.
 
 ## What it shows
 
-**Live KPIs (MVP-7.2).** `Events processed`, `Events per second`, `Active vehicles`,
+**Live KPIs.** `Events processed`, `Events per second`, `Active vehicles`,
 `Alerts generated` and `System status`, all of them read from `GET /api/v1/statistics` and from
 the `statistics` event of `GET /api/v1/stream/statistics`. The page paints once from REST - so
 the first impression is not an empty one - and then follows the stream, which re-sends the same
@@ -95,9 +101,9 @@ default).
 Every card names the source of its value, and a value the API reports as `null` is drawn as
 `—` rather than as a zero: `processedEvents` and `eventsPerSecond` are `null` exactly when the
 Kafka Streams counter of the processor cannot be read, and a dashboard that printed `0` there
-would be inventing a measurement nobody took (MVP-5.4).
+would be inventing a measurement nobody took.
 
-**Fleet map (MVP-7.3).** Leaflet over OpenStreetMap tiles - no key, no paid provider, and the
+**Fleet map.** Leaflet over OpenStreetMap tiles - no key, no paid provider, and the
 attribution the tile service requires is rendered with the map. Vehicles come from two places
 that are the same source of truth: the `vehicle` events of `GET /api/v1/stream/events`, and one
 page of `GET /api/v1/vehicles` used to seed the view and then re-read every 30 seconds so a
@@ -108,7 +114,7 @@ vehicle is seen, moved and re-drawn only when a value it draws changed, and remo
 backend stops reporting it. The map itself is created once and never rebuilt. Clicking a marker
 opens its `vehicleId`, `speed`, `status` and `lastUpdate`.
 
-**Live event feed (MVP-7.4).** The `alert` and `vehicle` events of the event stream, oldest
+**Live event feed.** The `alert` and `vehicle` events of the event stream, oldest
 first, each row carrying the time of the event, the vehicle, the kind of event and - for an
 alert - the measured speed and the threshold that was crossed. Alerts are set apart from
 telemetry both by their label and by the styling of the row, so a speeding vehicle is not
@@ -156,7 +162,7 @@ a stream is driven frame by frame and the assertions are about behaviour rather 
 It covers the mapping from a stream frame to a feed row, the incremental rule of the marker
 layer, the popup built for a vehicle, the two composables (including the bounded feed, the
 connection states and the periodic reconcile), and the three components that carry the
-acceptance criteria of this milestone.
+documented behaviour of the dashboard.
 
 ## Troubleshooting
 

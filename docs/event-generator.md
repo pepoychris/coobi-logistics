@@ -1,10 +1,16 @@
-# Event generator (MVP-1)
+---
+layout: page
+title: "Event generator"
+description: "The Java 21 simulator that publishes keyed vehicle telemetry into Kafka."
+---
+
+# Event generator
 
 The `event-generator` service simulates a vehicle fleet and publishes versioned telemetry
 events to Kafka. It is the first stage of the pipeline:
 
 ```text
-event-generator  ->  Kafka (logistics.vehicle.location.v1)  ->  stream-processor (MVP-2)
+event-generator  ->  Kafka (logistics.vehicle.location.v1)  ->  stream-processor
 ```
 
 One process keeps a fleet state, advances it on a schedule and publishes bounded batches
@@ -55,7 +61,7 @@ contract and are kept in sync with `.env.example` and README.md.
 | `GENERATOR_RANDOM_SEED` | Seed of the deterministic trajectory generator | `20260101` | long |
 
 Every other setting lives in
-[`application.yml`](../services/event-generator/src/main/resources/application.yml) and can
+[`application.yml`](https://github.com/pepoychris/coobi-logistics/blob/develop/services/event-generator/src/main/resources/application.yml) and can
 still be overridden with Spring's relaxed binding, for example
 `COOBI_GENERATOR_TICK_INTERVAL_MILLIS=200` or `COOBI_KAFKA_INITIALIZATION_ENABLED=false`.
 
@@ -81,7 +87,7 @@ and the Kafka health indicator still checks the broker.
 
 ### Bounding a load test
 
-`LOAD_TEST_DURATION` bounds the run of a load test (MVP-11.1). When the window elapses the
+`LOAD_TEST_DURATION` bounds the run of a load test. When the window elapses the
 publishing task cancels itself, the producer is drained the same way a shutdown drains it, and
 the service stays up with its health and metrics endpoints answering - so a benchmark stops the
 load without taking the pipeline down with it:
@@ -166,7 +172,7 @@ mutation of version 1.
 | Topic | Partitions | Replication factor | Purpose |
 | --- | --- | --- | --- |
 | `logistics.vehicle.location.v1` | 6 | 1 | vehicle location telemetry |
-| `logistics.vehicle.location.dlq.v1` | 6 | 1 | dead letter topic for invalid records (consumed from MVP-2) |
+| `logistics.vehicle.location.dlq.v1` | 6 | 1 | dead letter topic for invalid records (consumed by the stream processor) |
 
 The generator provisions both topics on startup, before the first publish:
 
@@ -178,8 +184,8 @@ The generator provisions both topics on startup, before the first publish:
 - an unreachable broker is retried a bounded number of times (5 attempts, 3 s apart by
   default) and then fails startup.
 
-Six partitions exist so the stream processor of MVP-2 can scale its consumers, and
-replication factor 1 matches the single-node broker of `compose.yml`. Inspect the topics
+Six partitions exist so the stream processor can scale its consumers, and replication
+factor 1 matches the single-node broker of `compose.yml`. Inspect the topics
 from the host:
 
 ```powershell
@@ -223,7 +229,7 @@ application cancels the scheduling task and flushes the producer before exiting
 | --- | --- |
 | Liveness and state | `GET http://localhost:8080/actuator/health` |
 | Counters | `/actuator/metrics/coobi.generator.events`, tagged `result=published` or `result=failed` |
-| Prometheus | `GET http://localhost:8080/actuator/prometheus`, scraped by the Prometheus of the local stack (MVP-8) |
+| Prometheus | `GET http://localhost:8080/actuator/prometheus`, scraped by the Prometheus of the local stack |
 | Kafka producer | The `kafka.producer.*` metrics of the client - records per second, errors, requests in flight - are bound by Micrometer and published on the same endpoint |
 | Rate logs | `telemetry throughput events-per-second=... published-total=... failed-total=...`, every 30 s by default |
 | Topic provisioning | `kafka topics created` / `already present` / `expanded` / `verified` |
@@ -280,7 +286,8 @@ is an equivalent fallback: `mvn -f services/event-generator/pom.xml test`.
 | Topics are still missing after startup | Topic creation is retried and then aborts startup; the `kafka topics ...` log lines report the attempt and the reason. |
 | `mvnw.cmd` fails under PowerShell 7 | The wrapper downloads a Maven distribution and can hit quoting, proxy or permission problems. Use the installed Maven instead: `mvn -f services/event-generator/pom.xml test`. |
 
-## Out of scope for MVP-1
+## Out of scope for this service
 
-No stream processing, persistence, frontend or authentication, no schema registry and no
-Avro, and no Dockerfile for this service. Those belong to later milestones.
+No stream processing, persistence, frontend or authentication, and no schema registry or
+Avro: this service only simulates the fleet and publishes telemetry. The container image of
+the service is documented in [deployment.md](deployment.md).

@@ -1,4 +1,10 @@
-# Observability (MVP-8)
+---
+layout: page
+title: "Observability"
+description: "Micrometer, Prometheus and Kafka client metrics of the local stack."
+---
+
+# Observability
 
 The pipeline answers two questions about itself: how much it is doing, and what it costs.
 This document is the contract of both answers - the metrics each service produces, the
@@ -36,14 +42,15 @@ docker compose ps
 | Retention | `15d`, in the `prometheus-data` volume |
 | Scrape targets | `event-generator:8080` and `stream-processor:8081`, the service names of the stack |
 
-The two application services run as containers of the same stack (MVP-10), so a scrape target is
-the service name `compose.yml` gives them, and the scrape needs neither a published host port nor
+The two application services run as containers of the same stack, so a scrape target is the
+service name `compose.yml` gives them, and the scrape needs neither a published host port nor
 the host gateway. The names are written out in the configuration file rather than interpolated
 from the environment, because Prometheus expands `${VAR}` references of that file in
-`external_labels` and nowhere else: the single `PROMETHEUS_HOST` this milestone shipped in a
-target was read by the container, never expanded, and left both targets `down`. To scrape a
-service somebody started from the host instead, change its target to `host.docker.internal:8080`
-or `:8081`; `compose.yml` maps that name on a Linux engine as well as on Docker Desktop.
+`external_labels` and nowhere else: the single `PROMETHEUS_HOST` this repository used to ship
+in a target was read by the container, never expanded, and left both targets `down`.
+To scrape a service somebody started from the host instead, change its target to
+`host.docker.internal:8080` or `:8081`; `compose.yml` maps that name on a Linux engine as well
+as on Docker Desktop.
 
 Both services must be running for their targets to be healthy. Prometheus starts without
 them, so a target is `down` until the service it describes is up; that is the expected state
@@ -85,9 +92,10 @@ management:
 
 The same classpath gives the service `/actuator/metrics`, the JSON view that reports one
 metric at a time. The logistics-api keeps only that view: it is not a scrape target, because
-the metrics of MVP-8.1 and MVP-8.3 are produced by the two services that touch Kafka.
+the pipeline metrics and the Kafka client metrics are produced by the two services that touch
+Kafka.
 
-## Pipeline metrics (MVP-8.1)
+## Pipeline metrics
 
 Five meters describe the telemetry the pipeline consumes and the alerts it produces. Their
 names are the contract: they are the names in `/actuator/metrics`, and Prometheus renders
@@ -141,7 +149,7 @@ the signal that a producer is being rejected while the service stays up.
 | --- | --- | --- | --- |
 | `coobi_generator_events_total` | Counter | `result` = `published` or `failed`, `topic` | Telemetry events confirmed by the broker, and events that could not be published |
 
-## Kafka metrics (MVP-8.3)
+## Kafka metrics
 
 The Kafka clients publish their own metrics next to the two sets above. They are bound by
 Micrometer, not by this repository, so the names below are the reported ones rather than

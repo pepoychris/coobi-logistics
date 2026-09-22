@@ -1,4 +1,10 @@
-# Performance benchmarks (MVP-11)
+---
+layout: page
+title: "Performance benchmarks"
+description: "Reproducible throughput and latency measurements with their raw captures."
+---
+
+# Performance benchmarks
 
 This document reports what the benchmark of this repository measured on the Dockerized stack of
 `compose.yml`, how those numbers were obtained, and where the pipeline stops keeping up. Every
@@ -19,7 +25,7 @@ every number here can be traced back to a sample: `infrastructure/benchmarks/res
 # one scenario: <vehicles>/<target events per second>/<window>
 python infrastructure/benchmarks/benchmark.py --scenario 10000/25000/5m
 
-# the four scenarios of the roadmap, five minutes each
+# the four standard scenarios, five minutes each
 python infrastructure/benchmarks/benchmark.py --matrix
 
 # the same four fleets and rates over a shorter window
@@ -36,7 +42,7 @@ Docker CLI with the Compose plugin. It starts and stops the stack itself.
 | --- | --- |
 | `--scenario <v>/<r>/<d>` | one scenario, repeatable |
 | `--matrix` | the four required scenarios: 1,000/1,000, 5,000/10,000, 10,000/25,000 and 20,000/50,000 |
-| `--duration <d>` | the window of a `--matrix` run; the scenarios of the roadmap are five minutes (default) |
+| `--duration <d>` | the window of a `--matrix` run; the standard scenarios are five minutes (default) |
 | `--sample-interval <d>` | how often the harness samples; `10s` by default |
 | `--frontend` | include the dashboard; a benchmark leaves it out |
 | `--reset-volumes` | delete the local volumes between scenarios; the default keeps them |
@@ -122,7 +128,7 @@ linear-interpolation percentile of those samples, and the peak is the highest sa
 | Kafka | `apache/kafka:4.3.1`, client 3.9.2 |
 | PostgreSQL | `postgres:18.6` |
 | Prometheus | `prom/prometheus:v3.14.0-busybox`, scrape interval 15s |
-| Repository revision | `a82c304` (MVP-10) with the MVP-11 working tree |
+| Repository revision | `a82c304` with the benchmark harness working tree |
 
 ### Partitions and topics
 
@@ -146,7 +152,7 @@ processor to run more than one stream task; they are also the ceiling of its par
 
 ## Results
 
-### The four scenarios of the roadmap
+### The four standard scenarios
 
 All four were requested with `--matrix` (five minutes each, `--sample-interval 10s`), in the run
 `infrastructure/benchmarks/results/20260921T160117Z-matrix/`:
