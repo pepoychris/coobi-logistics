@@ -1,8 +1,13 @@
-# Testing and reliability (MVP-9)
+---
+layout: page
+title: "Testing and reliability"
+description: "Unit suites, Testcontainers integration tests and the end-to-end smoke test."
+---
+
+# Testing and reliability
 
 This document is the testing contract of the repository: which tests exist, what each of
-them proves, how to run them, and what a machine without Docker does. The milestone it
-describes is MVP-9 of the roadmap.
+them proves, how to run them, and what a machine without Docker does.
 
 The suite has three layers, and every layer has a job the others cannot do:
 
@@ -12,7 +17,7 @@ The suite has three layers, and every layer has a job the others cannot do:
 | Container integration tests | `src/it/java` of the services that own Kafka and PostgreSQL | Docker, and the images of `compose.yml` | The pieces that only fail against a real broker or a real database: the topology on a broker, the migrations and the SQL on PostgreSQL |
 | Smoke test | `src/it/java` of `logistics-api` | Docker | The complete pipeline in one scenario: generated telemetry to the public API over HTTP |
 
-## The unit suite (MVP-9.1)
+## The unit suite
 
 The unit suite is the ordinary suite of each service - `mvn test` - and it is deliberately
 the only layer a contributor needs to run while working: it resolves no container
@@ -20,11 +25,11 @@ dependency at all, starts nothing, and reaches no external service. It runs agai
 in-memory database in PostgreSQL mode and against `TopologyTestDriver`, which runs the real
 topology without a broker.
 
-The minimum list of the milestone maps to the following tests. Every one of them is
-deterministic: nothing sleeps, no test waits for a wall-clock window, and the timelines a
-test needs are driven by the timestamps of the telemetry it feeds in.
+The test areas the suite has to cover map to the following tests. Every one of them is
+deterministic: nothing sleeps, no test waits for a wall-clock window, and the timelines a test
+needs are driven by the timestamps of the telemetry it feeds in.
 
-| Minimum of MVP-9.1 | Evidence |
+| Required test area | Evidence |
 | --- | --- |
 | Event validation | `event-generator`: `VehicleLocationEventValidationTest` (14). `stream-processor`: `TelemetryInspectorTest` (14), `TelemetryTopologyTest` (11, including the malformed payload, the unsupported version and the key that is not the vehicle) |
 | Vehicle simulation | `event-generator`: `VehicleTelemetrySimulatorTest` (8), `VehicleSimulationSettingsTest` (10), `PublishRatePlannerTest` (7) |
@@ -40,7 +45,7 @@ context with the broker absent (`StreamProcessorApplicationTests`,
 (`JdbcTelemetryPersistenceTest`), and the migrations are pinned to the schema the API maps
 (`PersistenceMigrationTest`, `SchemaContractTest`).
 
-## Container integration tests (MVP-9.2 and MVP-9.3)
+## Container integration tests
 
 The integration tests live in `src/it/java`, a source root that is added to the build by the
 `integration-tests` profile. Nothing about them exists in a default build: the profile is
@@ -54,12 +59,11 @@ Both services run the versions of the local stack: `apache/kafka:4.3.1` for the 
 | --- | --- | --- |
 | `stream-processor` `TelemetryPipelineIT` | Kafka | Telemetry produced through an ordinary Kafka client is processed by the real topology: crossing the speed limit publishes exactly one `SPEEDING_DETECTED` alert on `logistics.alert.v1`, keyed by the vehicle, with the measured speed, the configured threshold and the timestamp of the crossing. An invalid record reaches `logistics.vehicle.location.dlq.v1` carrying `originalEvent` byte for byte, the reason naming the field at fault, and the source topic - and the valid record published after it still produces its alert |
 | `stream-processor` `PostgresPersistenceIT` | PostgreSQL | The shipped migrations applied by Flyway (the engine of the service) to real PostgreSQL, recorded in `flyway_schema_history`, with the unique constraints of the schema; the production `JdbcTelemetryPersistence` creating the vehicle and its single latest-state row, overwriting that row instead of appending history, storing an alert with its JSON document addressable as JSONB, and storing a duplicate `eventId` exactly once - the constraint refuses a second row even for a writer that bypasses the port |
-| `logistics-api` `PipelineSmokeIT` | Kafka and PostgreSQL | MVP-9.4 below |
+| `logistics-api` `PipelineSmokeIT` | Kafka and PostgreSQL | The smoke test below |
 
-### The smoke test (MVP-9.4)
+### The smoke test
 
-`PipelineSmokeIT` is the scenario the milestone asks for, with every component being the real
-one:
+`PipelineSmokeIT` is the end-to-end scenario, with every component being the real one:
 
 ```text
 Generated telemetry -> Kafka -> stream processor -> PostgreSQL -> logistics-api -> HTTP

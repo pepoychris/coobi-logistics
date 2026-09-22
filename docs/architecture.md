@@ -1,3 +1,9 @@
+---
+layout: page
+title: "Architecture in one minute"
+description: "How the simulator, Kafka, Kafka Streams, PostgreSQL and the Vue console fit together."
+---
+
 # Architecture in one minute
 
 Coobi Logistics is a small, observable event pipeline: a simulator publishes vehicle telemetry, Kafka carries it, Kafka Streams derives state and alerts, PostgreSQL keeps the read model, and a Vue/Three.js dashboard reads the result over REST + SSE.
@@ -21,6 +27,7 @@ sequenceDiagram
   participant K as Kafka
   participant T as Topology
   participant D as PostgreSQL
+  participant A as Logistics API
   participant B as Browser
   S->>K: VehicleLocationEvent (key = vehicleId)
   K->>T: validate once
@@ -40,8 +47,11 @@ sequenceDiagram
 - SSE gives the browser live updates without exposing Kafka or sending every raw record.
 - Prometheus measures the real path; benchmark claims are backed by captured runs in [`docs/benchmarks.md`](benchmarks.md).
 
-## Portfolio scope
+## Where it runs
 
-The public-deployment work described as MVP-12.4 is intentionally excluded from this release. No Cloudflare tunnel, domain, or public infrastructure configuration is added.
+Everything described here is the local stack started by `docker compose up --build`. The
+published ports are bound to `127.0.0.1`, and the repository configures no tunnel, no
+domain and no public ingress, so Kafka, PostgreSQL, Prometheus and the Actuator endpoints
+are reachable only from the machine that runs the stack.
 
 See [`events.md`](events.md) for contracts and [`deployment.md`](deployment.md) for local startup.

@@ -15,6 +15,10 @@ Coobi Logistics turns live vehicle telemetry into a queryable fleet view: Kafka 
 | Benchmark report | [`docs/benchmarks.md`](docs/benchmarks.md) |
 | Local deployment | [`docs/deployment.md`](docs/deployment.md) |
 
+The same pages are published as a documentation site at <https://pepoychris.github.io/coobi-logistics/>.
+GitHub Pages builds it straight from this branch - `_config.yml` plus `_layouts/` and
+`assets/docs/` are the whole site definition, with no separate build step to reproduce.
+
 ## What makes it interesting
 
 - **Event-driven:** keyed Kafka telemetry, DLQ handling, replay-safe processing.
@@ -54,11 +58,15 @@ mvn -Dintegration-tests test
 python -m unittest discover -s infrastructure/benchmarks/tests
 ```
 
-The benchmark harness accepts `--scenario vehicles/events-per-second/duration` and `--matrix`, writes raw samples and never invents unavailable values. MVP-11 measured two five-minute scenarios; the larger scenarios are explicitly marked not run.
+The benchmark harness accepts `--scenario vehicles/events-per-second/duration` and `--matrix`, writes raw samples and never invents unavailable values. Two five-minute scenarios were measured; the larger scenarios are explicitly marked as not run.
 
-## Scope note
+## Where it runs
 
-MVP-12.4 (public Cloudflare/domain deployment) is intentionally excluded. This repository demonstrates the local, reproducible engineering system; it does not publish Kafka, PostgreSQL, Prometheus or Actuator endpoints to the internet.
+The pipeline runs on one machine with `docker compose up --build`, and that local stack is
+what every figure in these pages was measured on. Each published port is bound to
+`127.0.0.1`, and the repository ships no tunnel, no reverse proxy and no public ingress, so
+Kafka, PostgreSQL, Prometheus and the Actuator endpoints stay on the host that runs them.
+[`docs/deployment.md`](docs/deployment.md) is the reference for that stack.
 
 ## Technology
 

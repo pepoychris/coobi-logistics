@@ -1,19 +1,25 @@
-# Logistics REST API (MVP-5 and MVP-6)
+---
+layout: page
+title: "Logistics REST API"
+description: "REST endpoints and the server-sent event streams the dashboard reads."
+---
+
+# Logistics REST API
 
 `services/logistics-api` is the read side of the stack: a Spring Boot service that answers the
 operator views - the fleet, the alerts and the live statistics - from the state the stream
 processor has already derived and persisted. It owns no migration and writes no row: it maps
-the tables of MVP-4 and serves them as JSON, and it also serves the two browser streams of
-MVP-6 - the events that happen while a browser is connected, and the live statistics - as
-Server-Sent Events.
+the tables the stream processor persists and serves them as JSON, and it also serves the two
+browser streams - the events that happen while a browser is connected, and the live
+statistics - as Server-Sent Events.
 
 ```text
 browser / client
       │  HTTP  :8082
       │    ├─ JSON, one request per view
-      │    └─ SSE, one connection per stream (the dashboard of MVP-7)
+      │    └─ SSE, one connection per stream (read by the fleet console)
       ▼
-logistics-api  ──reads──▶  PostgreSQL  ◀──writes──  stream-processor (MVP-4)
+logistics-api  ──reads──▶  PostgreSQL  ◀──writes──  stream-processor
       │
       └──reads the Kafka Streams counters over the Actuator metrics of the processor
 ```
@@ -80,7 +86,7 @@ format rather than of a deployment - the frames held for one browser that has no
 `COOBI_STREAM_CLIENT_BUFFER_SIZE=64`.
 
 Every other setting lives in
-[`application.yml`](../services/logistics-api/src/main/resources/application.yml) and can still
+[`application.yml`](https://github.com/pepoychris/coobi-logistics/blob/develop/services/logistics-api/src/main/resources/application.yml) and can still
 be overridden with Spring's relaxed binding, for example
 `COOBI_STATISTICS_STREAM_PROCESSOR_PROCESSED_EVENTS_METRIC` or `SERVER_PORT=9082`.
 
@@ -113,7 +119,7 @@ Base path: `/api/v1`. Every response is JSON, except the two streams, which are
 | `GET` | `/api/v1/stream/events` | Server-Sent Events: the alerts and vehicle states that happen while a browser is connected, sampled |
 | `GET` | `/api/v1/stream/statistics` | Server-Sent Events: the live statistics, re-sent at the configured interval |
 | `GET` | `/actuator/health` | Health of the service, including the database |
-| `GET` | `/actuator/info` | Build and milestone information |
+| `GET` | `/actuator/info` | Application information reported by the Actuator info endpoint |
 
 ### Paging
 
@@ -231,7 +237,7 @@ Every value has a named source, and no value is estimated:
 
 | Field | Source | When it is `null` |
 | --- | --- | --- |
-| `processedEvents` | The counter the stream processor increments while it consumes the location topic (MVP-8), read over its Actuator metrics endpoint and summed over the measurements it publishes | The processor is unreachable, or does not publish the metric |
+| `processedEvents` | The counter the stream processor increments while it consumes the location topic, read over its Actuator metrics endpoint and summed over the measurements it publishes | The processor is unreachable, or does not publish the metric |
 | `eventsPerSecond` | The average rate between the two latest readings of that counter, in this instance | No second reading yet (the first response after a start), or the counter restarted with the processor |
 | `activeVehicles` | `SELECT COUNT(*)` of the vehicles whose latest state is `MOVING` | Never |
 | `alertsGenerated` | `SELECT COUNT(*)` of the rows currently stored in `alerts` | Never |
@@ -309,7 +315,7 @@ A burst that does not fit in one tick is sampled rather than queued - the cursor
 newest record of the batch, so the newest events are the ones sent and the browser stays at the
 live edge instead of being shown an hour of history one tick at a time. A vehicle whose state
 was overwritten twice between two ticks is one event, not two: the read model keeps one row per
-vehicle (MVP-4), and the stream reports what the state is now rather than what it was.
+vehicle, and the stream reports what the state is now rather than what it was.
 
 The two families are positioned differently, and it shows in one case. An alert is positioned by
 its stored key, which is generated in order, so every alert stored after the previous tick is

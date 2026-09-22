@@ -1,10 +1,16 @@
+---
+layout: page
+title: "Agent orchestration"
+description: "How implementation, review and correction agents work in this repository."
+---
+
 # Agent orchestration
 
 This project uses a phase-based workflow to keep implementation fast and focused.
 
 - One `phase_implementer` handles one cohesive packet of related work.
 - The packet contains the exact scope, files, acceptance criteria, non-goals, and
-  focused verification commands; unrelated roadmap content is omitted.
+  focused verification commands; unrelated project content is omitted.
 - A single `phase_reviewer` runs only after the whole phase is implemented. It reviews
   the complete diff once and does not edit files.
 - Any findings are grouped into one correction request to the implementing agent(s),
@@ -34,7 +40,7 @@ repeated reviews, and unnecessary token usage.
 
 The primary orchestrator owns integration. Each phase that changes repository code is
 worked on a short-lived branch created from `develop`, using the `codex/` prefix and a
-phase-specific name (for example, `codex/mvp-1-kafka-event-producer`). The branch is
+phase-specific name (for example, `codex/event-generator-topics`). The branch is
 created before the phase commit; local tooling artifacts such as `.codegraph/`, `.codex/`
 and `.cursor/` remain untracked and are not included in phase commits.
 
