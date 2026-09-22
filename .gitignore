@@ -87,6 +87,10 @@ _site/
 .jekyll-cache/
 .jekyll-metadata
 
+# Private interview handout (kept local, never published)
+output/pdf/
+tmp/pdfs/
+
 # OS noise
 .DS_Store
 Thumbs.db
